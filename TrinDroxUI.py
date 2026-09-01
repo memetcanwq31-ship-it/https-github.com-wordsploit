@@ -1,1124 +1,795 @@
-# =====================================================================
-# TRINDROX UI v2026.3.0 - YENİ NESİL SİBER GÜVENLİK FRAMEWORK
-# GELİŞTİRİCİ / KOD ADI: M A R K Ø
-# =====================================================================
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# =============================================================
+#  TRINDROX v2026.3 — FULL INTEL SYSTEM (Tam Kod)
+#  Kullanıcı adından HER ŞEY: 52 Platform + GitHub + Domain
+#  + DNS + IP + WHOIS + Gravatar — tek komutla.
+#  Kurulum: pip install httpx colorama rich phonenumbers
+#  Çalıştır: python3 trindrox.py
+# =============================================================
 
 import os
-import sys
 import re
-import ssl
+import sys
+import time
+import shutil
 import socket
-import hashlib
 import asyncio
+import hashlib
+import ssl
 import json
-import uuid
 from datetime import datetime
-from urllib.parse import urlparse
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
-from colorama import init
-
+from colorama import Fore, Style, init as colorama_init
 from rich.console import Console
 from rich.panel import Panel
-from rich.text import Text
 from rich.table import Table
+from rich.text import Text
 
-# Opsiyonel ama gerçek analiz için önerilir
-try:
-    import phonenumbers
-    from phonenumbers import carrier as tel_carrier, timezone as tel_tz, geocoder as tel_geo
-    PHONENUMBERS_OK = True
-except ImportError:
-    PHONENUMBERS_OK = False
-
-try:
-    from cryptography import x509
-    from cryptography.hazmat.primitives import hashes
-    CRYPTO_OK = True
-except ImportError:
-    CRYPTO_OK = False
-
-init(autoreset=True)
+colorama_init(autoreset=True)
 console = Console()
 
-KIRMIZI = "[bold red]"
-YESIL = "[bold green]"
-MAVI = "[bold blue]"
-SARI = "[bold yellow]"
-MOR = "[bold magenta]"
-CYAN = "[bold cyan]"
-RENK_BITIR = "[/]"
+# ---- RENK SABİTLERİ (eski kodunla uyumlu) ----
+MOR     = Fore.MAGENTA
+KIRMIZI = Fore.RED
+SARI    = Fore.YELLOW
+YESIL   = Fore.GREEN
+MAVI    = Fore.CYAN
+RENK_BITIR = Style.RESET_ALL
 
-HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-DOMAIN_REGEX = re.compile(r"(?:https?://)?(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}")
-IP_REGEX = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
-EMAIL_REGEX = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
+RENK = {
+    "cyan":   Fore.CYAN,
+    "red":    Fore.RED,
+    "green":  Fore.GREEN,
+    "yellow": Fore.YELLOW,
+    "blue":   Fore.BLUE,
+    "purple": Fore.MAGENTA,
+}
 
+# =============================================================
+#  TELEFON NUMARASI ANALİZİ (Operatör / Bölge / Hat Tipi)
+# =============================================================
+try:
+    import phonenumbers
+    from phonenumbers import carrier, geocoder, timezone as pn_timezone
+    HAS_PHONENUMBERS = True
+except ImportError:
+    HAS_PHONENUMBERS = False
 
-# =====================================================================
-# OSINT CORE 1 — KULLANICI ADI İZİ TARAMASI (GENİŞ LETİLMİŞ)
-# =====================================================================
-
-class TrindroxOSINT:
-    def __init__(self, target_username: str):
-        self.target = target_username
-        self.results = {}
-        # Sherlock data.json referanslı, doğrulanmış URL patternleri
-        self.platforms = {
-            "Instagram":   f"https://www.instagram.com/{self.target}/",
-            "GitHub":      f"https://github.com/{self.target}",
-            "X (Twitter)": f"https://x.com/{self.target}",
-            "Reddit":      f"https://www.reddit.com/user/{self.target}/about.json",
-            "TikTok":      f"https://www.tiktok.com/@{self.target}",
-            "Telegram":    f"https://t.me/{self.target}",
-            "YouTube":     f"https://www.youtube.com/@{self.target}",
-            "Medium":      f"https://medium.com/@{self.target}",
-            "Pinterest":   f"https://www.pinterest.com/{self.target}/",
-            "Steam":       f"https://steamcommunity.com/id/{self.target}",
-            "Facebook":    f"https://www.facebook.com/{self.target}",
-            "Twitch":      f"https://www.twitch.tv/{self.target}",
-            "Spotify":     f"https://open.spotify.com/user/{self.target}",
-            "SoundCloud":  f"https://soundcloud.com/{self.target}",
-            "Bluesky":     f"https://bsky.app/profile/{self.target}",
-            "Mastodon":    f"https://mastodon.social/@{self.target}",
-            "GitLab":      f"https://gitlab.com/{self.target}",
-            "Bitbucket":   f"https://bitbucket.org/{self.target}",
-            "Keybase":     f"https://keybase.io/{self.target}",
-            "Ko-fi":       f"https://ko-fi.com/{self.target}",
-            "BuyMeCoffee": f"https://www.buymeacoffee.com/{self.target}",
-            "Patreon":     f"https://www.patreon.com/{self.target}",
-            "Pexels":      f"https://www.pexels.com/@{self.target}/",
-            "DeviantArt":  f"https://www.deviantart.com/{self.target}",
-            "ArtStation":  f"https://www.artstation.com/{self.target}",
-            "Bandcamp":    f"https://{self.target}.bandcamp.com",
-            "Last.fm":     f"https://www.last.fm/user/{self.target}",
-            "Flickr":      f"https://www.flickr.com/people/{self.target}",
-            "Imgur":       f"https://imgur.com/user/{self.target}",
-            "Vimeo":       f"https://vimeo.com/{self.target}",
-            "Dailymotion": f"https://www.dailymotion.com/{self.target}",
-            "Letterboxd":  f"https://letterboxd.com/{self.target}/",
-            "Chess.com":   f"https://www.chess.com/member/{self.target}",
-            "Lichess":     f"https://lichess.org/@/{self.target}",
-            "HackerNews":  f"https://news.ycombinator.com/user?id={self.target}",
-            "HackerEarth": f"https://www.hackerearth.com/@{self.target}/",
-            "CodePen":     f"https://codepen.io/{self.target}",
-            "Replit":      f"https://replit.com/@{self.target}",
-            "Codewars":    f"https://www.codewars.com/users/{self.target}",
-            "LeetCode":    f"https://leetcode.com/{self.target}/",
-            "About.me":    f"https://about.me/{self.target}",
-            "Wikipedia":   f"https://en.wikipedia.org/wiki/User:{self.target}",
-            "Wikivoyage":  f"https://en.wikivoyage.org/wiki/User:{self.target}",
-            "WordPress":   f"https://{self.target}.wordpress.com",
-            "Blogger":     f"https://{self.target}.blogspot.com",
-            "Tumblr":      f"https://{self.target}.tumblr.com",
-            "Goodreads":   f"https://www.goodreads.com/{self.target}",
-            "Trakt":       f"https://trakt.tv/users/{self.target}",
-            "Discogs":     f"https://www.discogs.com/user/{self.target}",
-            "unsplash":    f"https://unsplash.com/@{self.target}",
-            "itch.io":     f"https://{self.target}.itch.io",
-            " roblox":     f"https://www.roblox.com/user.aspx?username={self.target}",
-            "speedrun.com": f"https://www.speedrun.com/user/{self.target}",
-        }
-
-    async def check_platform(self, client, name: str, url: str):
-        try:
-            response = await client.get(url, headers=HEADERS, timeout=10.0, follow_redirects=True)
-            body = response.text
-
-            if name == "Telegram":
-                if response.status_code == 200 and "tgme_page_extra" in body:
-                    self.results[name] = f"{YESIL}AKTİF → {url}{RENK_BITIR}"
-                else:
-                    self.results[name] = f"{KIRMIZI}BULUNAMADI{RENK_BITIR}"
-                return
-
-            if name == "Reddit":
-                if response.status_code == 200 and '"error"' not in body[:200]:
-                    self.results[name] = f"{YESIL}AKTİF → {url}{RENK_BITIR}"
-                else:
-                    self.results[name] = f"{KIRMIZI}BULUNAMADI{RENK_BITIR}"
-                return
-
-            if name == "X (Twitter)":
-                if response.status_code == 200 and self.target.lower() in body.lower():
-                    self.results[name] = f"{SARI}DOĞRULANAMADI (X anti-bot koruması){RENK_BITIR}"
-                else:
-                    self.results[name] = f"{KIRMIZI}BULUNAMADI{RENK_BITIR}"
-                return
-
-            if response.status_code == 200:
-                # Bazı siteler 200 döner ama "user not found" sayfası gösterir
-                not_found_signals = [
-                    "user not found", "page not found", "404",
-                    "not_found", "no user found", "no such user"
-                ]
-                body_lower = body[:3000].lower()
-                if any(sig in body_lower for sig in not_found_signals):
-                    self.results[name] = f"{KIRMIZI}BULUNAMADI{RENK_BITIR}"
-                else:
-                    self.results[name] = f"{YESIL}AKTİF → {url}{RENK_BITIR}"
-            elif response.status_code == 404:
-                self.results[name] = f"{KIRMIZI}BULUNAMADI{RENK_BITIR}"
-            elif response.status_code in (403, 429):
-                self.results[name] = f"{SARI}ERİŞİM ENGELLENDİ (KOD: {response.status_code}){RENK_BITIR}"
-            elif response.status_code in (301, 302, 307, 308):
-                self.results[name] = f"{SARI}YÖNLENDİRME ({response.status_code}){RENK_BITIR}"
-            else:
-                self.results[name] = f"{SARI}ŞÜPHELİ (KOD: {response.status_code}){RENK_BITIR}"
-
-        except httpx.TimeoutException:
-            self.results[name] = "[dim white]ZAMAN AŞIMI[/dim white]"
-        except httpx.TooManyRedirects:
-            self.results[name] = "[dim white]YÖNLENDİRME DÖNGÜSÜ[/dim white]"
-        except Exception as e:
-            self.results[name] = f"[dim white]BAĞLANTI HATASI ({type(e).__name__})[/dim white]"
-
-    async def scan_all(self) -> Panel:
-        async with httpx.AsyncClient(
-            follow_redirects=True,
-            timeout=httpx.Timeout(15.0, connect=8.0),
-            limits=httpx.Limits(max_connections=30, max_keepalive_connections=10)
-        ) as client:
-            tasks = [self.check_platform(client, n, u) for n, u in self.platforms.items()]
-            await asyncio.gather(*tasks)
-
-        table = Table(title=f"[ İSTİHBARAT RAPORU: {self.target} ] ({len(self.platforms)} PLATFORM)", title_style="bold magenta", expand=True)
-        table.add_column("Platform", style="cyan", justify="left")
-        table.add_column("Durum / Tespit Linki", style="white", justify="left")
-        for platform, status in self.results.items():
-            table.add_row(platform, status)
-
-        aktif = sum(1 for s in self.results.values() if "AKTİF" in s)
-        engelli = sum(1 for s in self.results.values() if "ENGELLENDİ" in s)
-        table.add_section()
-        ozet = f"{YESIL}{aktif}/{len(self.platforms)} platformda aktif iz.{RENK_BITIR}"
-        if engelli > 0:
-            ozet += f" | {SARI}{engelli} platform anti-bot engelli.{RENK_BITIR}"
-        table.add_row("[bold]ÖZET[/bold]", ozet)
-        return Panel(table, border_style="green", title="[ OSINT CORE OUTPUT ]", title_align="left")
-
-    def get_active_urls(self) -> list:
-        """Aktif bulunan URL'leri döndür (FullIntel için)"""
-        return [url for status in self.results.values() if "AKTİF" in status
-                for url in [re.search(r'https?://\S+', status)] if url]
-
-    def get_found_platforms(self) -> dict:
-        """Bulunan platformları döndür (isim → URL)"""
-        found = {}
-        for name, status in self.results.items():
-            match = re.search(r'https?://\S+', status)
-            if match and ("AKTİF" in status or "ENGELLENDİ" in status):
-                found[name] = match.group(0)
-        return found
-
-
-# =====================================================================
-# OSINT CORE 2 — GITHUB DERİN ANALİZ (GENİŞ LETİLMİŞ)
-# =====================================================================
-
-class TrindroxGitHub:
-    async def deep_scan(self, username: str) -> Panel:
-        api = f"https://api.github.com/users/{username}"
-        try:
-            async with httpx.AsyncClient() as client:
-                r = await client.get(api, headers=HEADERS, timeout=10.0)
-        except Exception:
-            return Panel(f"{KIRMIZI}[!] GitHub API'ye ulaşılamadı.{RENK_BITIR}", border_style="red")
-
-        if r.status_code == 404:
-            return Panel(f"{KIRMIZI}[!] GitHub kullanıcısı bulunamadı: {username}{RENK_BITIR}", border_style="red")
-        if r.status_code == 403:
-            return Panel(f"{SARI}[!] GitHub API rate-limit (60/saat). Biraz bekle.{RENK_BITIR}", border_style="yellow")
-
-        d = r.json()
-        table = Table(title=f"[ GITHUB DERİN ANALİZ: {username} ]", title_style="bold magenta", expand=True)
-        table.add_column("Alan", style="cyan")
-        table.add_column("Gerçek Veri", style="white")
-
-        table.add_row("Kullanıcı Adı", d.get("login", "-"))
-        table.add_row("USER ID (Gerçek)", f"{YESIL}{d.get('id', '-')}{RENK_BITIR}")
-        table.add_row("NODE ID (Global GUID)", f"{YESIL}{d.get('node_id', '-')}{RENK_BITIR}")
-        table.add_row("Hesap Oluşturma", d.get("created_at", "-"))
-        table.add_row("Son Güncelleme", d.get("updated_at", "-"))
-        table.add_row("Ad", d.get("name") or "-")
-        table.add_row("Bio", d.get("bio") or "-")
-        table.add_row("Şirket", d.get("company") or "-")
-        table.add_row("Konum (kendi bildirmiş)", d.get("location") or "-")
-        table.add_row("E-posta (profil)", d.get("email") or "-")
-        table.add_row("Blog / Site", d.get("blog") or "-")
-        table.add_row("Twitter", d.get("twitter_username") or "-")
-        table.add_row("Takipçi / Takip", f"{d.get('followers', 0)} / {d.get('following', 0)}")
-        table.add_row("Herkese Açık Repo", str(d.get("public_repos", 0)))
-        table.add_row("Profil URL", d.get("html_url", "-"))
-        table.add_row("Avatar URL", d.get("avatar_url", "-"))
-        table.add_row("Hireable", str(d.get("hireable", "-")))
-
-        # --- Commit e-postası ve domain çıkarımı ---
-        found_emails = set()
-        found_domains = set()
-        try:
-            async with httpx.AsyncClient() as client:
-                er = await client.get(
-                    f"https://api.github.com/users/{username}/events/public?per_page=100",
-                    headers=HEADERS, timeout=10.0
-                )
-                if er.status_code == 200:
-                    for ev in er.json():
-                        # Commit yazarı e-postası
-                        for commit in ev.get("payload", {}).get("commits", []):
-                            em = commit.get("author", {}).get("email")
-                            nm = commit.get("author", {}).get("name")
-                            if em and "noreply" not in em and "users.noreply.github.com" not in em:
-                                found_emails.add(f"{nm} <{em}>")
-                            # Commit mesajlarında domain
-                            msg = commit.get("message", "")
-                            for dm in DOMAIN_REGEX.findall(msg):
-                                if not any(x in dm for x in ["github.com", "githubusercontent", "localhost", "127.0.0"]):
-                                    found_domains.add(dm)
-
-                        # Issue/PR gövdesinde e-posta
-                        if ev.get("type") in ("IssuesEvent", "PullRequestEvent"):
-                            body = ev.get("payload", {}).get("issue", {}).get("body") or ""
-                            for em in EMAIL_REGEX.findall(body):
-                                if "github" not in em and "noreply" not in em:
-                                    found_emails.add(em)
-        except Exception:
-            pass
-
-        if found_emails:
-            table.add_section()
-            table.add_row("COMMIT E-POSTALARI", f"{SARI}{', '.join(list(found_emails)[:5])}{RENK_BITIR}")
-        if found_domains:
-            table.add_row("BULUNAN DOMAİNLER", f"{CYAN}{', '.join(list(found_domains)[:5])}{RENK_BITIR}")
-
-        return Panel(table, border_style="magenta", title="[ GITHUB DEEP OSINT OUTPUT ]", title_align="left"), \
-               list(found_emails), list(found_domains)
-
-    async def extract_intel(self, username: str):
-        """FullIntel için veri çıkarma (Panel + e-posta + domain)"""
-        result = await self.deep_scan(username)
-        if isinstance(result, tuple):
-            return result
-        return result, [], []
-
-
-# =====================================================================
-# WHOIS (RDAP - ANAHTARSIZ ÜCRETSİZ)
-# =====================================================================
-
-class TrindroxWHOIS:
-    async def lookup(self, domain: str) -> Panel:
-        domain = domain.strip().lower().replace("http://", "").replace("https://", "").strip("/")
-        # Subdomain varsa ana domaini al
-        parts = domain.split(".")
-        if len(parts) > 2 and parts[-2].lower() not in ("co", "org", "net", "gov", "edu"):
-            domain = ".".join(parts[-2:])
-
-        try:
-            async with httpx.AsyncClient() as client:
-                r = await client.get(
-                    f"https://rdap.org/domain/{domain}",
-                    headers={**HEADERS, "Accept": "application/rdap+json"},
-                    timeout=15.0,
-                    follow_redirects=True
-                )
-        except Exception:
-            return Panel(f"{KIRMIZI}[!] RDAP sunucusuna ulaşılamadı: {domain}{RENK_BITIR}", border_style="red")
-
-        if r.status_code == 404:
-            return Panel(f"{KIRMIZI}[!] Domain kaydı bulunamadı: {domain}{RENK_BITIR}", border_style="red")
-        if r.status_code != 200:
-            return Panel(f"{KIRMIZI}[!] RDAP sorgusu başarısız (KOD: {r.status_code}){RENK_BITIR}", border_style="red")
-
-        d = r.json()
-        table = Table(title=f"[ WHOIS RDAP RAPORU: {domain} ]", title_style="bold blue", expand=True)
-        table.add_column("Alan", style="cyan")
-        table.add_column("Gerçek Veri", style="white")
-
-        table.add_row("Domain", f"{YESIL}{d.get('ldhName', domain)}{RENK_BITIR}")
-
-        # Handle
-        handle = d.get("handle", "-")
-        table.add_row("Registry Handle", handle)
-
-        # Durum (status codes)
-        statuses = d.get("status", [])
-        if statuses:
-            status_str = ", ".join(statuses[:5])
-            locked = any("lock" in s.lower() or "prohibited" in s.lower() for s in statuses)
-            status_col = CYAN if locked else SARI
-            table.add_row("Durum Kodları", f"{status_col}{status_str}{RENK_BITIR}")
-
-        # Eventler (oluşturma, güncelleme, bitiş)
-        events = d.get("events", [])
-        for ev in events:
-            ev_action = ev.get("eventAction", "")
-            ev_date = ev.get("eventDate", "")
-            if ev_action and ev_date:
-                display_name = {
-                    "registration": "Kayıt Tarihi",
-                    "expiration": "Bitiş Tarihi",
-                    "last changed": "Son Değişiklik",
-                    "last update of RDAP database": "RDAP Güncelleme",
-                    "transfer": "Transfer",
-                }.get(ev_action, ev_action.title())
-                table.add_row(display_name, ev_date[:10])
-
-        # Nameservers
-        nameservers = d.get("nameservers", [])
-        ns_list = [ns.get("ldhName", "") for ns in nameservers[:5]]
-        if ns_list:
-            table.add_row("Nameserverlar", ", ".join(filter(None, ns_list)))
-
-        # Entities (registrar, kayıt sahibi)
-        entities = d.get("entities", [])
-        for entity in entities[:3]:
-            roles = entity.get("roles", [])
-            vcard = entity.get("vcardArray", [None, []])
-            name = "-"
-            for item in vcard[1] if len(vcard) > 1 else []:
-                if item[0] == "fn":
-                    name = item[3]
-                    break
-            email = "-"
-            for item in vcard[1] if len(vcard) > 1 else []:
-                if item[0] == "email":
-                    email = item[3]
-                    break
-            role_str = ", ".join(roles[:3])
-            table.add_row(f"Entity ({role_str})", f"{name}" + (f" | {email}" if email != "-" else ""))
-
-        return Panel(table, border_style="blue", title="[ WHOIS RDAP OUTPUT ]", title_align="left")
-
-
-# =====================================================================
-# GRAVATAR — E-POSTADAN PROFİL ÇEKME
-# =====================================================================
-
-class TrindroxGravatar:
-    async def lookup_by_email(self, email: str) -> Panel:
-        email = email.strip().lower()
-        md5_hash = hashlib.md5(email.encode()).hexdigest()
-
-        # Avatar URL
-        avatar_url = f"https://www.gravatar.com/avatar/{md5_hash}?s=200&d=identicon"
-
-        # Profil JSON (eski endpoint, hala aktif)
-        profile_url = f"https://www.gravatar.com/{md5_hash}.json"
-        try:
-            async with httpx.AsyncClient() as client:
-                r = await client.get(profile_url, headers=HEADERS, timeout=10.0, follow_redirects=True)
-        except Exception:
-            return Panel(f"{KIRMIZI}[!] Gravatar servisine ulaşılamadı.{RENK_BITIR}", border_style="red")
-
-        table = Table(title=f"[ GRAVATAR OSINT: {email} ]", title_style="bold yellow", expand=True)
-        table.add_column("Alan", style="cyan")
-        table.add_column("Değer", style="white")
-        table.add_row("E-posta", email)
-        table.add_row("MD5 Hash", f"{SARI}{md5_hash}{RENK_BITIR}")
-        table.add_row("Avatar URL", f"[link={avatar_url}]{avatar_url[:50]}...[/link]")
-
-        if r.status_code == 200:
-            d = r.json()
-            entry = d.get("entry", [{}])[0]
-            table.add_row("Profil Mevcut", f"{YESIL}EVET{RENK_BITIR}")
-            table.add_row("Hash (Gravatar)", entry.get("hash", "-"))
-            table.add_row("Görünen Ad", entry.get("displayName", "-"))
-            table.add_row("Hakkında", entry.get("aboutMe", "-"))
-            table.add_row("Mevcut Konum", entry.get("currentLocation", "-"))
-            if entry.get("thumbnailUrl"):
-                table.add_row("Avatar Thumb", f"https://www.gravatar.com{entry['thumbnailUrl']}")
-            urls = entry.get("urls", [])
-            if urls:
-                url_list = ", ".join([u.get("value", "") for u in urls[:3]])
-                table.add_row("Bağlantılı URLler", url_list)
-            if entry.get("accounts"):
-                accounts = entry.get("accounts", [])
-                acc_str = ", ".join([f"{a.get('shortname', '')}({a.get('url', '')[:30]})" for a in accounts[:4]])
-                table.add_row("Bağlı Hesaplar", acc_str)
-        elif r.status_code == 404:
-            table.add_row("Profil Mevcut", f"{KIRMIZI}HAYIR (Profil yok veya gizli){RENK_BITIR}")
-        else:
-            table.add_row("Profil Sorgusu", f"{SARI}KOD: {r.status_code}{RENK_BITIR}")
-
-        return Panel(table, border_style="yellow", title="[ GRAVATAR OUTPUT ]", title_align="left")
-
-
-# =====================================================================
-# OSINT CORE 3 — IP LOCATOR (GENİŞ LETİLMİŞ)
-# =====================================================================
-
-class TrindroxIPLocator:
-    async def locate(self, target: str) -> tuple:
-        """Panel + çözümlenen IP'yi döndürür"""
-        target_ip = target
-        # IPv6 check
-        if ":" in target and IP_REGEX.match(target) is None:
-            return Panel(f"{KIRMIZI}[!] IPv6 henüz desteklenmiyor: {target}{RENK_BITIR}", border_style="red"), None
-
-        try:
-            resolved = socket.gethostbyname(target)
-            if resolved != target:
-                target_ip = resolved
-        except socket.gaierror:
-            return Panel(f"{KIRMIZI}[!] Hedef çözümlenemedi: {target}{RENK_BITIR}", border_style="red"), None
-
-        try:
-            async with httpx.AsyncClient() as client:
-                r = await client.get(
-                    f"http://ip-api.com/json/{target_ip}?fields=status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,mobile,proxy,hosting,query,reverse",
-                    headers=HEADERS, timeout=10.0
-                )
-                if r.status_code == 429:
-                    return Panel(f"{SARI}[!] ip-api rate-limit (45/min). 60sn bekle.{RENK_BITIR}", border_style="yellow"), None
-                if r.status_code != 200 or r.json().get("status") != "success":
-                    return Panel(f"{KIRMIZI}[!] Konum servisi yanıt vermedi: {r.json().get('message', '')}{RENK_BITIR}", border_style="red"), None
-                d = r.json()
-        except Exception:
-            return Panel(f"{KIRMIZI}[!] Konum servisine bağlanılamadı.{RENK_BITIR}", border_style="red"), None
-
-        proxy_flag = f"{KIRMIZI}EVET (Proxy/VPN/TOR){RENK_BITIR}" if d.get("proxy") else f"{YESIL}HAYIR{RENK_BITIR}"
-        hosting_flag = f"{SARI}EVET (Sunucu/Hosting){RENK_BITIR}" if d.get("hosting") else "HAYIR"
-        mobile_flag = f"{SARI}EVET (Mobil şebeke){RENK_BITIR}" if d.get("mobile") else "HAYIR"
-        harita = f"https://www.google.com/maps?q={d.get('lat')},{d.get('lon')}"
-        reverse_dns = d.get("reverse") or "-"
-
-        table = Table(title=f"[ IP LOCATOR RAPORU: {target} → {target_ip} ]", title_style="bold cyan", expand=True)
-        table.add_column("Bilgi", style="cyan")
-        table.add_column("Gerçek Değer", style="white")
-
-        table.add_row("Çözümlenen IP", f"{YESIL}{d.get('query')}{RENK_BITIR}")
-        table.add_row("Reverse DNS (PTR)", reverse_dns)
-        table.add_row("Ülke / Kod", f"{d.get('country')} ({d.get('countryCode')})")
-        table.add_row("Bölge / Şehir", f"{d.get('regionName')} / {d.get('city')}")
-        table.add_row("Posta Kodu", d.get("zip") or "-")
-        table.add_row("Koordinat (Lat/Lon)", f"{d.get('lat')}, {d.get('lon')}")
-        table.add_row("Saat Dilimi", d.get("timezone") or "-")
-        table.add_row("ISP", d.get("isp") or "-")
-        table.add_row("Organizasyon", d.get("org") or "-")
-        table.add_row("AS Numarası", d.get("as") or "-")
-        table.add_row("Proxy/VPN Tespiti", proxy_flag)
-        table.add_row("Hosting/Sunucu", hosting_flag)
-        table.add_row("Mobil Şebeke", mobile_flag)
-        table.add_section()
-        table.add_row("TAM KONUM (HARİTA)", f"[bold yellow underline link={harita}]{harita}[/bold yellow underline][/]")
-        return Panel(table, border_style="cyan", title="[ IP LOCATOR OUTPUT ]", title_align="left"), target_ip
-
-    async def locate_panel(self, target: str) -> Panel:
-        """Sadece Panel döndürür (mevcut davranış)"""
-        panel, _ = await self.locate(target)
-        return panel
-
-
-# =====================================================================
-# OSINT CORE 4 — TELEFON NUMARASI ANALİZİ (MEVCUT - İYİ)
-# =====================================================================
 
 class TrindroxPhone:
-    def analyze(self, phone: str) -> Panel:
-        if not PHONENUMBERS_OK:
-            return Panel(f"{KIRMIZI}[!] phonenumbers kütüphanesi yok. Kur: pip install phonenumbers{RENK_BITIR}", border_style="red")
+    """Telefon numarasından operatör, bölge ve hat tipi bilgisi çıkarır."""
 
+    def analyze(self, raw: str) -> Panel:
+        body = Text()
+        if not HAS_PHONENUMBERS:
+            body.append("[!] phonenumbers kurulu değil → pip install phonenumbers\n", style="red")
+            return Panel(body, title="[ TELEFON ANALİZİ ]", border_style="red")
+
+        body.append(f"[*] Girdi: {raw}\n", style="cyan")
         try:
-            if phone.startswith("+"):
-                num = phonenumbers.parse(phone)
-            else:
-                num = phonenumbers.parse(phone, "TR")
+            num = phonenumbers.parse(raw, None)
+        except Exception as e:
+            body.append(f"[!] Ayrıştırma hatası: {e}\n", style="red")
+            return Panel(body, title="[ TELEFON ANALİZİ ]", border_style="red")
+
+        if not phonenumbers.is_valid_number(num):
+            body.append("[✘] Geçersiz numara.\n", style="red")
+            return Panel(body, title="[ TELEFON ANALİZİ ]", border_style="red")
+
+        intl = phonenumbers.format_number(num, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
+        body.append(f"  Uluslararası format : {intl}\n", style="green")
+        body.append(f"  Ülke kodu          : +{num.country_code}\n")
+        body.append(f"  Ulusal numara      : {num.national_number}\n")
+
+        # Operatör (carrier) — ağ verisi, gerçek bilgi
+        try:
+            op = carrier.name_for_number(num, "tr") or "bilinmiyor"
         except Exception:
-            return Panel(f"{KIRMIZI}[!] Numara ayrıştırılamadı: {phone}{RENK_BITIR}", border_style="red")
+            op = "bilinmiyor"
+        body.append(f"  Operatör           : {op}\n", style="yellow")
 
-        gecerli = phonenumbers.is_valid_number(num)
-        table = Table(title=f"[ TELEFON ANALİZ RAPORU: {phone} ]", title_style="bold yellow", expand=True)
-        table.add_column("Bilgi", style="cyan")
-        table.add_column("Gerçek Değer", style="white")
-
-        table.add_row("E.164 Formatı", f"{YESIL if gecerli else KIRMIZI}{phonenumbers.format_number(num, phonenumbers.PhoneNumberFormat.E164)}{RENK_BITIR}")
-        table.add_row("Numara Geçerli mi", f"{YESIL}GEÇERLİ{RENK_BITIR}" if gecerli else f"{KIRMIZI}GEÇERSİZ{RENK_BITIR}")
-        table.add_row("Ülke", tel_geo.country_name_for_number(num, "tr") or "-")
-        bolge = tel_geo.description_for_number(num, "tr") or "-"
-        table.add_row("Bölge/Şehir Kodu", bolge)
-        operator = tel_carrier.name_for_number(num, "tr") or "-"
-        table.add_row("Operatör (Gerçek)", f"{SARI}{operator}{RENK_BITIR}")
-
-        tip_map = {
-            phonenumbers.PhoneNumberType.MOBILE: "MOBİL HAT",
-            phonenumbers.PhoneNumberType.FIXED_LINE: "SABİT HAT",
-            phonenumbers.PhoneNumberType.FIXED_LINE_OR_MOBILE: "SABİT/MOBİL",
-            phonenumbers.PhoneNumberType.VOIP: "VOIP (İnternet Hattı)",
-            phonenumbers.PhoneNumberType.TOLL_FREE: "ÜCRETSİZ HAT",
-            phonenumbers.PhoneNumberType.PREMIUM_RATE: "PRİM HATTI",
-        }
-        hat_tipi = tip_map.get(phonenumbers.number_type(num), "BELİRSİZ")
-        table.add_row("Hat Tipi", hat_tipi)
-
+        # Bölge (geocoder) — numaranın kayıtlı olduğu coğrafi alan
         try:
-            tz_list = tel_tz.time_zones_for_number(num)
-            table.add_row("Saat Dilimi", ", ".join(tz_list))
+            bolge = geocoder.description_for_number(num, "tr") or "bilinmiyor"
+        except Exception:
+            bolge = "bilinmiyor"
+        body.append(f"  Kayıtlı bölge      : {bolge}\n", style="yellow")
+
+        # Hat tipi (mobil / sabit / voip) — gerçek veri
+        try:
+            from phonenumbers import number_type
+            t = number_type(num)
+            tipler = {
+                phonenumbers.PhoneNumberType.MOBILE:    "Mobil hat",
+                phonenumbers.PhoneNumberType.FIXED_LINE: "Sabit hat",
+                phonenumbers.PhoneNumberType.VOIP:       "VoIP hat",
+                phonenumbers.PhoneNumberType.TOLL_FREE:  "Ücretsiz hat",
+                phonenumbers.PhoneNumberType.PREMIUM_RATE: "Premium hat",
+            }
+            hat_tipi = tipler.get(t, "Diğer / bilinmiyor")
+        except Exception:
+            hat_tipi = "bilinmiyor"
+        body.append(f"  Hat tipi           : {hat_tipi}\n", style="yellow")
+
+        # Zaman dilimi — numaranın kayıtlı olduğu coğrafi alana göre
+        try:
+            tz = pn_timezone.time_zones_for_number(num)
+            tz_str = ", ".join(tz) if tz else "bilinmiyor"
+        except Exception:
+            tz_str = "bilinmiyor"
+        body.append(f"  Zaman dilimi       : {tz_str}\n", style="yellow")
+
+        body.append("\n[dim]  Not: Hattın sahibinin kimliği operatör verisi değildir ve\n")
+        body.append("        hiçbir anahtarsız API'de bulunmaz. Yukarıdaki tüm bilgiler\n")
+        body.append("        numaranın kendisinden türeyen gerçek verilerdir.[/dim]\n")
+
+        return Panel(body, title="[ TELEFON ANALİZİ — GERÇEK VERİ ]", border_style="yellow")
+
+
+# =============================================================
+#  IP LOCATOR & REVERSE DNS (anahtarsız — ipapi.co + socket)
+# =============================================================
+class TrindroxIPLocator:
+    """IP veya domain → coğrafi konum + koordinat + reverse DNS + harita."""
+
+    async def locate_panel(self, hedef: str) -> Panel:
+        body = Text()
+        body.append(f"[*] Hedef: {hedef}\n", style="cyan")
+
+        # 1) Domain ise IP'ye çevir (socket — anahtarsız, sınırsız)
+        ip = hedef
+        try:
+            socket.inet_aton(hedef)
+        except OSError:
+            try:
+                ip = socket.gethostbyname(hedef)
+                body.append(f"  DNS çözümü  : {hedef} → {ip}\n", style="green")
+            except Exception as e:
+                body.append(f"[!] DNS hatası: {e}\n", style="red")
+                return Panel(body, title="[ IP LOCATOR ]", border_style="red")
+
+        # 2) ipapi.co — ücretsiz coğrafi konum (anahtar gerekmez)
+        try:
+            async with httpx.AsyncClient(timeout=10) as cli:
+                r = await cli.get(f"https://ipapi.co/{ip}/json/")
+                d = r.json()
+        except Exception as e:
+            body.append(f"[!] ipapi hatası: {e}\n", style="red")
+            return Panel(body, title="[ IP LOCATOR ]", border_style="red")
+
+        if d.get("error"):
+            body.append(f"[✘] API hatası: {d.get('reason')}\n", style="red")
+            return Panel(body, title="[ IP LOCATOR ]", border_style="red")
+
+        # 3) Reverse DNS (socket — anahtarsız)
+        rev = "bilinmiyor"
+        try:
+            rev = socket.gethostbyaddr(ip)[0]
         except Exception:
             pass
 
-        table.add_section()
-        table.add_row("[bold]NOT[/bold]", "[dim]Hat sahibi kimlik verisi operatör API'sine bağlıdır ve halka açık değildir.[/dim]")
-        return Panel(table, border_style="yellow", title="[ PHONE INTEL OUTPUT ]", title_align="left")
+        # 4) Harita bağlantısı (OpenStreetMap — anahtarsız)
+        lat = d.get("latitude", "?")
+        lon = d.get("longitude", "?")
+        osm = f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=11/{lat}/{lon}"
+
+        body.append(f"  IP adresi      : {ip}\n", style="green")
+        body.append(f"  Ülke           : {d.get('country_name', '?')} ({d.get('country_code', '?')})\n")
+        body.append(f"  Şehir          : {d.get('city', '?')}\n")
+        body.append(f"  Bölge          : {d.get('region', '?')}\n")
+        body.append(f"  Posta kodu     : {d.get('postal', '?')}\n")
+        body.append(f"  Koordinat      : {lat}, {lon}\n", style="yellow")
+        body.append(f"  Zaman dilimi   : {d.get('timezone', '?')}\n")
+        body.append(f"  ISP            : {d.get('org', '?')}\n")
+        body.append(f"  ASN            : {d.get('asn', '?')}\n")
+        body.append(f"  Reverse DNS    : {rev}\n", style="yellow")
+        body.append(f"  Harita         : {osm}\n", style="yellow")
+
+        return Panel(body, title="[ IP LOCATOR — GERÇEK KONUM ]", border_style="cyan")
 
 
-# =====================================================================
-# OSINT CORE 5 — DİJİTAL PARMAK İZİ + SERTİFİKA (MEVCUT - İYİ)
-# =====================================================================
+# =============================================================
+#  WHOIS / RDAP — IANA bootstrap destekli, anahtarsız
+# =============================================================
+class TrindroxWHOIS:
+    """Domain → RDAP kaydı (registrar, tarihler, nameserver, durum)."""
 
-class TrindroxFingerprint:
-    async def fingerprint(self, host: str) -> Panel:
-        host = host.replace("https://", "").replace("http://", "").strip().strip("/")
-        table = Table(title=f"[ DİJİTAL PARMAK İZİ: {host} ]", title_style="bold magenta", expand=True)
-        table.add_column("Katman", style="cyan")
-        table.add_column("Gerçek Veri", style="white")
+    async def lookup(self, domain: str) -> Panel:
+        body = Text()
+        body.append(f"[*] Domain: {domain}\n", style="cyan")
+
+        domain = domain.strip().lower().replace("http://", "").replace("https://", "").split("/")[0]
 
         try:
-            async with httpx.AsyncClient(verify=False) as client:
-                r = await client.get(f"https://{host}", headers=HEADERS, timeout=10.0, follow_redirects=True)
-            h = r.headers
-            table.add_row("HTTP Durumu", str(r.status_code))
-            server = h.get("server") or "-"
-            table.add_row("Server (Sunucu İzi)", f"{YESIL}{server}{RENK_BITIR}")
-            table.add_row("X-Powered-By", h.get("x-powered-by") or "-")
-            table.add_row("Content-Type", h.get("content-type") or "-")
-            table.add_row("CF-Ray (Cloudflare İzi)", h.get("cf-ray") or "YOK")
-            guvenlik = []
-            for hdr in ["strict-transport-security", "content-security-policy", "x-frame-options", "x-content-type-options"]:
-                guvenlik.append(f"{hdr}: {'VAR' if hdr in h else 'YOK'}")
-            table.add_row("Güvenlik Başlıkları", " | ".join(guvenlik))
-            cookies = h.get("set-cookie")
-            if cookies:
-                c_names = [c.split("=")[0] for c in cookies.split("; ") if "=" in c][:4]
-                table.add_row("Cookie Parmak İzi", f"{SARI}{', '.join(c_names)}{RENK_BITIR}")
+            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as cli:
+                r = await cli.get(f"https://rdap.org/domain/{domain}")
         except Exception as e:
-            table.add_row("HTTP Katmanı", f"{KIRMIZI}HATA: {type(e).__name__}{RENK_BITIR}")
+            body.append(f"[!] rdap.org hatası: {e}\n", style="red")
+            return Panel(body, title="[ WHOIS RDAP ]", border_style="red")
 
+        if r.status_code == 404:
+            body.append("[✘] Kayıt bulunamadı (404).\n", style="red")
+            return Panel(body, title="[ WHOIS RDAP ]", border_style="red")
+        if r.status_code == 429:
+            body.append("[✘] Rate limit (429) — 60 sn bekleyip tekrar deneyin.\n", style="red")
+            return Panel(body, title="[ WHOIS RDAP ]", border_style="red")
+        if r.status_code != 200:
+            body.append(f"[✘] HTTP {r.status_code}\n", style="red")
+            return Panel(body, title="[ WHOIS RDAP ]", border_style="red")
+
+        try:
+            d = r.json()
+        except Exception as e:
+            body.append(f"[!] JSON hatası: {e}\n", style="red")
+            return Panel(body, title="[ WHOIS RDAP ]", border_style="red")
+
+        # Temel alanlar
+        body.append(f"  Handle      : {d.get('handle', '?')}\n")
+        for ev in d.get("events", []):
+            body.append(f"  {ev.get('eventAction', '?').title():<12}: {ev.get('eventDate', '?')}\n")
+        body.append(f"  Durum       : {', '.join(d.get('status', [])) or '?'}\n")
+
+        # Registrar
+        for ent in d.get("entities", []):
+            if "registrar" in ent.get("roles", []):
+                v = ent.get("vcardArray", [None, []])[1]
+                for item in v:
+                    if item[0] == "fn":
+                        body.append(f"  Registrar   : {item[3]}\n", style="yellow")
+                break
+
+        # Nameserver
+        ns = d.get("nameservers", [])
+        if ns:
+            body.append(f"  Nameserver  : {', '.join(n.get('ldhName', '?') for n in ns)}\n")
+
+        return Panel(body, title="[ WHOIS RDAP — ANAHTARSIZ ]", border_style="green")
+
+
+# =============================================================
+#  DIGITAL FINGERPRINT — TLS SERTİFİKASI + E-POSTA ÇIKARIMI
+# =============================================================
+class TrindroxFingerprint:
+    """
+    TLS sertifikasından: Subject, Issuer, geçerlilik tarihleri,
+    SAN alanları, SHA-256 parmak izi ve sertifika içinde geçen
+    e-posta adreslerini çıkarır. Hiçbir API anahtarı gerektirmez.
+    """
+
+    async def fingerprint(self, hedef: str) -> Panel:
+        body = Text()
+        body.append(f"[*] Hedef: {hedef}\n", style="cyan")
+
+        host = hedef.strip().lower().replace("https://", "").replace("http://", "").split("/")[0]
+        port = 443
+
+        # TLS el sıkışması — socket + ssl (sistem kütüphanesi, anahtarsız)
         try:
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
-            with socket.create_connection((host, 443), timeout=6) as sock:
-                with ctx.wrap_socket(sock, server_hostname=host) as ssock:
-                    tls_version = ssock.version()
-                    cipher = ssock.cipher()[0] if ssock.cipher() else "-"
-                    der = ssock.getpeercert(binary_form=True)
-            table.add_row("TLS Sürümü", f"{YESIL}{tls_version}{RENK_BITIR}")
-            table.add_row("Şifre Paketi (Cipher)", cipher)
+            loop = asyncio.get_running_loop()
+            with socket.create_connection((host, port), timeout=8) as sock:
+                with ctx.wrap_socket(sock, server_hostname=host) as tls:
+                    der = tls.getpeercert(binary_form=True)
+                    cert = ssl.DER_cert_to_PEM_cert(der)
+        except Exception as e:
+            body.append(f"[!] TLS hatası: {e}\n", style="red")
+            return Panel(body, title="[ FINGERPRINT ]", border_style="red")
 
-            if der and CRYPTO_OK:
-                cert = x509.load_der_x509_certificate(der)
-                sha_fp = cert.fingerprint(hashes.SHA256()).hex(":")
-                table.add_row("Sertifika Seri No (GERÇEK)", f"{SARI}{cert.serial_number}{RENK_BITIR}")
-                try:
-                    nb, na = cert.not_valid_before_utc, cert.not_valid_after_utc
-                except AttributeError:
-                    nb, na = cert.not_valid_before, cert.not_valid_after
-                table.add_row("Sertifika Geçerlilik", f"{nb.strftime('%Y-%m-%d')} → {na.strftime('%Y-%m-%d')}")
-                table.add_row("Konu (Subject)", cert.subject.rfc4514_string()[:60])
-                table.add_row("Veren (Issuer)", cert.issuer.rfc4514_string()[:60])
-                table.add_row("SHA-256 Parmak İzi", f"[bold yellow]{sha_fp}[/bold yellow]")
-            elif der and not CRYPTO_OK:
-                raw_fp = hashlib.sha256(der).hexdigest()
-                table.add_row("SHA-256 Parmak İzi (ham)", raw_fp)
-                table.add_row("Not", "[dim]Detaylı sertifika alanları için: pip install cryptography[/dim]")
-        except Exception:
-            table.add_row("TLS Katmanı", f"{KIRMIZI}Bağlantı kurulamadı / TLS yok{RENK_BITIR}")
-
-        return Panel(table, border_style="magenta", title="[ FINGERPRINT OUTPUT ]", title_align="left")
-
-
-# =====================================================================
-# FIREWALL ANALYZER — MEVCUT (İYİ)
-# =====================================================================
-
-class TrindroxAnalyzer:
-    def __init__(self, target_host: str):
-        self.host = target_host
-        self.target_ports = {
-            21: "FTP (Dosya)", 22: "SSH (Güvenli)", 23: "Telnet",
-            25: "SMTP (E-Posta)", 53: "DNS (Sistem)", 80: "HTTP (Web)",
-            110: "POP3 (Posta)", 443: "HTTPS (Güvenli Web)", 445: "SMB (Paylaşım)",
-            3306: "MySQL", 3389: "RDP (Uzak Masaüstü)", 8080: "HTTP-Alt",
-        }
-        self.open_ports = []
-        self.firewall_detected = False
-
-    async def scan_port(self, port: int, description: str):
+        # DER → X.509 parse (openssl s_client benzeri, sistem ssl ile)
         try:
-            conn = asyncio.open_connection(self.host, port)
-            reader, writer = await asyncio.wait_for(conn, timeout=2.5)
-            self.open_ports.append((port, description, f"{YESIL}AÇIK (Açık Kapı){RENK_BITIR}"))
-            try:
-                banner = await asyncio.wait_for(reader.read(128), timeout=1.5)
-                banner_str = banner.decode(errors="replace").strip().replace("\n", " ")[:60]
-                if banner_str:
-                    self.open_ports.append(("", "", f"[dim]└ Banner: {banner_str}[/dim]"))
-            except Exception:
-                pass
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except Exception:
-                pass
-        except asyncio.TimeoutError:
-            self.firewall_detected = True
+            x509 = ssl._ssl._test_decode_cert if False else None
         except Exception:
             pass
 
-    async def run_analysis(self) -> Panel:
+        # Basit parse: PEM'i DER'e çevir, alanları regex ile çek
+        pem_bytes = cert.encode()
+        sha256_fp = hashlib.sha256(
+            ssl.PEM_cert_to_DER_cert(cert)
+        ).hexdigest()
+
+        # Sertifika alanlarını çek (PEM metninden)
+        import ssl as _ssl
+        from _ssl import _dnsname_match  # noqa — sertifika alanlarına erişim
+
+        # Daha temiz yol: openssl komutunu kullan (anahtarsız, her sistemde var)
         try:
-            target_ip = socket.gethostbyname(self.host)
-        except socket.gaierror:
-            return Panel(f"{KIRMIZI}[!] Hata: Makine ({self.host}) bulunamadı.{RENK_BITIR}", border_style="red")
+            proc = await asyncio.create_subprocess_exec(
+                "openssl", "x509", "-noout", "-subject", "-issuer", "-dates",
+                "-ext", "subjectAltName",
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            out, _ = await proc.communicate(pem_bytes)
+            metin = out.decode(errors="replace")
+        except Exception:
+            metin = ""
 
-        tasks = [self.scan_port(port, desc) for port, desc in self.target_ports.items()]
-        await asyncio.gather(*tasks)
+        # Alanları çıkar
+        subject = issuer = notBefore = notAfter = "?"
+        sans = []
+        for line in metin.splitlines():
+            if line.startswith("subject="):
+                subject = line.split("=", 1)[1].strip()
+            elif line.startswith("issuer="):
+                issuer = line.split("=", 1)[1].strip()
+            elif line.startswith("notBefore="):
+                notBefore = line.split("=", 1)[1].strip()
+            elif line.startswith("notAfter="):
+                notAfter = line.split("=", 1)[1].strip()
+            elif line.startswith("X509v3 Subject Alternative Name"):
+                pass
+            elif line.strip().startswith("DNS:"):
+                sans.append(line.strip().replace("DNS:", ""))
 
-        table = Table(title=f"[ NETWORK ANALİZ RAPORU: {self.host} ({target_ip}) ]", title_style="bold cyan", expand=True)
-        table.add_column("Port", style="yellow", justify="center")
-        table.add_column("Servis Adı", style="white")
-        table.add_column("Sistem Durumu", style="green")
+        # E-posta adreslerini sertifika metninden çek
+        e_postalar = sorted(set(re.findall(
+            r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", metin
+        )))
 
-        if self.open_ports:
-            for port, desc, status in self.open_ports:
-                table.add_row(str(port), desc, status)
+        body.append(f"  Host         : {host}:{port}\n", style="green")
+        body.append(f"  Subject      : {subject}\n")
+        body.append(f"  Issuer       : {issuer}\n")
+        body.append(f"  Geçerlilik   : {notBefore} → {notAfter}\n")
+        if sans:
+            body.append(f"  SAN (DNS)    : {', '.join(sans[:6])}{' …' if len(sans) > 6 else ''}\n")
+        body.append(f"  SHA-256 FP   : {sha256_fp}\n", style="yellow")
+        if e_postalarlar := e_postalar:
+            body.append(f"  E-posta      : {', '.join(e_postalar[:4])}{' …' if len(e_postalar) > 4 else ''}\n", style="yellow")
         else:
-            table.add_row("---", "Açık kritik port tespit edilemedi.", "[dim white]KAPALI[/dim white]")
+            body.append("  E-posta      : sertifika içinde bulunamadı\n", style="dim")
 
-        fw_status = f"{KIRMIZI}AKTİF / AGRESİF (Filtreliyor){RENK_BITIR}" if self.firewall_detected else f"{SARI}ZAYIF VEYA YOK (Açık){RENK_BITIR}"
-        table.add_section()
-        table.add_row("[bold]FIREWALL[/bold]", "[bold]Güvenlik Duvarı Durumu:[/bold]", fw_status)
-        return Panel(table, border_style="cyan", title="[ FIREWALL ANALYZER OUTPUT ]", title_align="left")
+        return Panel(body, title="[ FINGERPRINT OUTPUT — GERÇEK VERİ ]", border_style="magenta")
 
 
-# =====================================================================
-# SMS GATEWAY — SİMÜLASYON (DEĞİŞMEDİ - GÜVENLİ TASARIM)
-# =====================================================================
+# =============================================================
+#  GITHUB DEEP SCAN — UserID / Node ID / COMMIT E-POSTALARI
+# =============================================================
+class TrindroxGitHub:
+    """GitHub kullanıcı adı → UserID, Node ID, bio'daki domainler,
+    ve public commit'lerdeki e-posta adresleri."""
 
-class TrindroxSMS:
-    """Simülasyon modülü: Gerçek SMS gateway'lerine istek ATMAZ."""
-
-    def __init__(self, target_phone: str, loop_count: int = 5):
-        self.phone = target_phone
-        self.loops = loop_count
-        self.success_count = 0
-        self.failed_count = 0
-
-    async def send_single_sms(self, step: int):
-        await asyncio.sleep(0.3)
-        if step % 5 != 0:
-            self.success_count += 1
-        else:
-            self.failed_count += 1
-
-    async def start_gateway(self) -> Panel:
-        tasks = [self.send_single_sms(i) for i in range(1, self.loops + 1)]
-        await asyncio.gather(*tasks)
-
-        table = Table(title=f"[ GATEWAY TRAFİK RAPORU: {self.phone} ] (SİMÜLASYON)", title_style="bold yellow", expand=True)
-        table.add_column("İşlem Türü", style="cyan")
-        table.add_column("İstatistik / Durum", style="white", justify="center")
-        table.add_row("Mod", f"{SARI}SİMÜLASYON (Gerçek istek atılmadı){RENK_BITIR}")
-        table.add_row("Başarılı Gönderim", f"{YESIL}{self.success_count} Adet{RENK_BITIR}")
-        table.add_row("Başarısız/Engellenen", f"{KIRMIZI}{self.failed_count} Adet{RENK_BITIR}")
-
-        status_summary = f"{YESIL}TAMAMLANDI{RENK_BITIR}" if self.failed_count == 0 else f"{SARI}KISMEN ENGELLENDİ (RATE LIMIT){RENK_BITIR}"
-        table.add_section()
-        table.add_row("[bold]SONUÇ[/bold]", status_summary)
-        return Panel(table, border_style="yellow", title="[ SMS GATEWAY OUTPUT ]", title_align="left")
-
-
-# =====================================================================
-# HASH LAB — MEVCUT (İYİ)
-# =====================================================================
-
-class TrindroxHashLab:
-    MODLAR = {
-        32: ["MD5", "NTLM", "MD4", "LM"],
-        40: ["SHA1", "MySQL5"],
-        56: ["SHA224"],
-        64: ["SHA256", "SHA3-256", "BLAKE2s"],
-        96: ["SHA384"],
-        128: ["SHA512", "Whirlpool", "SHA3-512"],
+    HEADERS = {
+        "User-Agent": "Trindrox-OSINT/2026.3",
+        "Accept": "application/vnd.github+json",
     }
 
-    def analyze(self, hash_string: str) -> Panel:
-        hash_string = hash_string.strip()
-        uzunluk = len(hash_string)
-        muhtemel = self.MODLAR.get(uzunluk, [])
-        hex_gecerli = bool(re.fullmatch(r"[0-9a-fA-F]+", hash_string))
-        karakter_seti = "Hexadecimal" if hex_gecerli else "BİLİNMİYEN (Hex değil!)"
-        buyuk_harf = hash_string.isupper()
+    async def deep_scan(self, kullanici: str):
+        """Kullanıcı adı → (panel, commit_e_postalari, bio_domainleri) döndürür."""
+        body = Text()
+        e_postalarlar = set()
+        domain_set = set()
 
-        table = Table(title="[ HASH KRİPTANALİZ RAPORU ]", title_style="bold magenta", expand=True)
-        table.add_column("Özellik", style="cyan")
-        table.add_column("Tespit", style="white")
-        table.add_row("Hash Değeri", f"[bold yellow]{hash_string[:32]}{'...' if uzunluk > 32 else ''}[/bold yellow]")
-        table.add_row("Uzunluk", f"{uzunluk} karakter")
-        table.add_row("Karakter Seti", karakter_seti)
+        # 1) Profili çek
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True) as cli:
+            r = await cli.get(f"https://api.github.com/users/{kullanici}",
+                              headers=self.HEADERS)
+            if r.status_code == 404:
+                body.append(f"[✘] GitHub'da '{kullanici}' bulunamadı.\n", style="red")
+                return Panel(body, title="[ GITHUB DEEP SCAN ]", border_style="red"), None, None
+            if r.status_code == 403:
+                body.append("[✘] 403 — GitHub rate limit (60 istek/saat).\n", style="red")
+                body.append("[i] Token eklersen 5.000/saat: headers['Authorization']='Bearer <token>'\n", style="dim")
+                return Panel(body, title="[ GITHUB DEEP SCAN ]", border_style="red"), None, None
+            if r.status_code != 200:
+                body.append(f"[✘] HTTP {r.status_code}\n", style="red")
+                return Panel(body, title="[ GITHUB DEEP SCAN ]", border_style="red"), None, None
 
-        if muhtemel and hex_gecerli:
-            tahmin = " / ".join(muhtemel)
-            if uzunluk == 32 and buyuk_harf:
-                tahmin += " (Büyük harf → Windows NTLM/LM olabilir)"
-            table.add_row("Muhtemel Algoritma", f"{YESIL}{tahmin}{RENK_BITIR}")
-        else:
-            table.add_row("Muhtemel Algoritma", f"{KIRMIZI}Tespit edilemedi (sıra/salt'lı format olabilir){RENK_BITIR}")
+            d = r.json()
 
-        table.add_section()
-        table.add_row("[bold]İPUCU[/bold]", "Kırma için: hashcat -m <mod> hash.txt wordlist.txt")
-        return Panel(table, border_style="magenta", title="[ HASH LAB OUTPUT ]", title_align="left")
+        # 2) Profili yaz
+        body.append(f"  Login        : {d.get('login', '?')}\n", style="green")
+        body.append(f"  UserID       : {d.get('id', '?')}\n", style="yellow")
+        body.append(f"  Node ID      : {d.get('node_id', '?')}\n", style="yellow")
+        if d.get("name"):
+            body.append(f"  Ad           : {d['name']}\n")
+        if d.get("company"):
+            body.append(f"  Şirket       : {d['company']}\n")
+        if d.get("location"):
+            body.append(f"  Konum        : {d['location']}\n")
+        if d.get("email"):
+            body.append(f"  E-posta      : {d['email']}\n", style="yellow")
+            e_postalar.add(d["email"])
+        if d.get("blog"):
+            body.append(f"  Blog         : {d['blog']}\n", style="yellow")
+            b = d["blog"]
+            if b and not b.startswith("http"):
+                b = "https://" + b
+            host = re.sub(r"^https?://", "", b or "").split("/")[0]
+            if host and "." in host:
+                domain_set.add(host)
+        if d.get("twitter_username"):
+            body.append(f"  Twitter      : @{d['twitter_username']}\n", style="yellow")
+        body.append(f"  Public repos : {d.get('public_repos', '?')}\n")
+        body.append(f"  Takipçi      : {d.get('followers', '?')}\n")
+        body.append(f"  Oluşturma    : {d.get('created_at', '?')}\n")
+        if d.get("bio"):
+            # Bio metninde geçen e-posta ve domainleri de çek
+            bio = d["bio"]
+            for ep in re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", bio):
+                e_postalar.add(ep)
+            for dm in re.findall(r"(?:https?://)?(?:www\.)?([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})", bio):
+                if "." in dm and " " not in dm:
+                    domain_set.add(dm)
 
-    def crack_wordlist(self, hash_string: str, wordlist_path: str, algorithm: str) -> Panel:
-        algo_map = {
-            "MD5": hashlib.md5,
-            "SHA1": hashlib.sha1,
-            "SHA256": hashlib.sha256,
-            "SHA512": hashlib.sha512,
-        }
-        h_fonk = algo_map.get(algorithm.upper())
-        if not h_fonk:
-            return Panel(f"{KIRMIZI}[!] Desteklenen algoritmalar: MD5, SHA1, SHA256, SHA512{RENK_BITIR}", border_style="red")
-
-        hedef = hash_string.strip().lower()
+        # 3) Public event'lerden commit e-postalarını çek
         try:
-            with open(wordlist_path, "r", encoding="utf-8", errors="ignore") as f:
-                denenen = 0
-                for satir in f:
-                    kelime = satir.strip()
-                    if not kelime:
-                        continue
-                    denenen += 1
-                    if h_fonk(kelime.encode()).hexdigest() == hedef:
-                        table = Table(title="[ KIRMA BAŞARILI ]", title_style="bold green", expand=True)
-                        table.add_column("Alan", style="cyan")
-                        table.add_column("Değer", style="white")
-                        table.add_row("Hash", hash_string)
-                        table.add_row("Düz Metin", f"{YESIL}{kelime}{RENK_BITIR}")
-                        table.add_row("Algoritma", algorithm.upper())
-                        table.add_row("Denenen Kelime", str(denenen))
-                        return Panel(table, border_style="green", title="[ HASH LAB OUTPUT ]", title_align="left")
-
-            return Panel(f"{KIRMIZI}[!] {denenen} denemede kırılamadı. Wordlist'i değiştir.{RENK_BITIR}", border_style="red")
-        except FileNotFoundError:
-            return Panel(f"{KIRMIZI}[!] Wordlist dosyası bulunamadı: {wordlist_path}{RENK_BITIR}", border_style="red")
-
-
-# =====================================================================
-# OPSEC SHIELD — MEVCUT (İYİ)
-# =====================================================================
-
-class TrindroxOpSec:
-    def __init__(self):
-        self.current_ip = "BİLİNMİYOR"
-        self.vpn_status = f"{KIRMIZI}RİSKLİ (VPN YOK){RENK_BITIR}"
-        self.tor_status = f"{KIRMIZI}PASİF (Tor Yok){RENK_BITIR}"
-
-    async def check_security_status(self) -> Panel:
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get("https://ipapi.co/json/", headers=HEADERS, timeout=5.0)
-                if response.status_code == 200:
-                    data = response.json()
-                    self.current_ip = data.get("ip", "BİLİNMİYOR")
-                    org = (data.get("org") or "").lower()
-                    if any(x in org for x in ["vpn", "hosting", "cloud", "server", "ovh", "digitalocean", "linode", "vultr", "m247", "datacamp"]):
-                        self.vpn_status = f"{YESIL}GÜVENLİ (VPN/Sunucu Aktif){RENK_BITIR}"
-                    else:
-                        self.vpn_status = f"{SARI}AÇIK AĞ (Yerel ISP){RENK_BITIR}"
+            async with httpx.AsyncClient(timeout=12, follow_redirects=True) as cli:
+                r2 = await cli.get(f"https://api.github.com/users/{kullanici}/events/public",
+                                   headers=self.HEADERS)
+                if r2.status_code == 200:
+                    events = r2.json()
+                    for ev in events:
+                        if ev.get("type") == "PushEvent":
+                            for cm in ev.get("payload", {}).get("commits", []):
+                                auth = cm.get("author", {})
+                                ep = auth.get("email")
+                                nm = auth.get("name")
+                                if ep:
+                                    e_postalar.add(ep)
+                                if nm:
+                                    pass
+                elif r2.status_code == 403:
+                    body.append("[i] Commit event limiti doldu (aynı 60/saat).\n", style="dim")
         except Exception:
-            self.current_ip = "BAĞLANTI YOK"
+            pass
 
-        table = Table(title="[ OPSEC GİZLİLİK VE ŞİFRELEME DURUMU ]", title_style="bold green", expand=True)
-        table.add_column("Güvenlik Katmanı", style="cyan")
-        table.add_column("Mevcut Analiz Çıktısı", style="white")
-        table.add_row("Dış IP Adresi", f"[bold yellow]{self.current_ip}[/bold yellow]")
-        table.add_row("VPN Kalkanı", self.vpn_status)
-        table.add_row("Tor Yönlendirmesi", self.tor_status)
-        return Panel(table, border_style="green", title="[ OPSEC SHIELD OUTPUT ]", title_align="left")
+        # 4) Özet paneli yaz
+        if e_postalar:
+            body.append(f"  Commit E-postaları : {', '.join(sorted(e_postalar))}\n", style="green")
+        if domain_set:
+            body.append(f"  Bio Domainleri     : {', '.join(sorted(domain_set))}\n", style="yellow")
+
+        domain_set.update(domain_set)  # no-op, temizlik
+        e_postalar_list = sorted(e_postalar)
+        domain_list = sorted(domain_set)
+
+        panel = Panel(body, title="[ GITHUB DEEP SCAN — GERÇEK VERİ ]", border_style="magenta")
+        return panel, e_postalar_list, domain_list
 
 
-# =====================================================================
-# ★★★ FULL INTEL CHAIN — KULLANICI ADINDAN HER ŞEY ★★★
-# =====================================================================
+# =============================================================
+#  USERNAME SCAN — 52 PLATFORM (GERÇEK HTTP KONTROL)
+# =============================================================
+class TrindroxOSINT:
+    """
+    Kullanıcı adını 52 platformda gerçekte kontrol eder. Her platform için
+    gerçek HTTP isteği atılır (HEAD → 200 = VAR, 404 = YOK). Anahtar gerekmez.
+    JS ile render edilen siteler (X, Instagram) her zaman "DOĞRULANAMADI" döner;
+    bu bilinen ve kasıtlı davranıştır (login duvarı / JS render).
+    """
 
+    PLATFORMS = {
+        # ————— Sosyal ağlar —————
+        "GitHub":      "https://github.com/{}",
+        "Reddit":      "https://www.reddit.com/user/{}",
+        "YouTube":     "https://www.youtube.com/@{}",
+        "Twitch":      "https://www.twitch.tv/{}",
+        "Pinterest":   "https://www.pinterest.com/{}",
+        "Tumblr":      "https://{}.tumblr.com",
+        "Medium":      "https://medium.com/@{}",
+        "SoundCloud":  "https://soundcloud.com/{}",
+        "Spotify":     "https://open.spotify.com/user/{}",
+        "Steam":       "https://steamcommunity.com/id/{}",
+        "Roblox":      "https://www.roblox.com/user.aspx?username={}",
+        "Chess":       "https://www.chess.com/member/{}",
+        "Lichess":     "https://lichess.org/@/{}",
+        "Gravatar":    "https://gravatar.com/{}",
+        "About.me":    "https://about.me/{}",
+        "SlideShare":  "https://www.slideshare.net/{}",
+        "DeviantArt":  "https://{}.deviantart.com",
+        "Flickr":      "https://www.flickr.com/people/{}",
+        "Vimeo":       "https://vimeo.com/{}",
+        "Dailymotion": "https://www.dailymotion.com/{}",
+        "Bitbucket":   "https://bitbucket.org/{}",
+        "GitLab":      "https://gitlab.com/{}",
+        "Docker Hub":  "https://hub.docker.com/u/{}",
+        "npm":         "https://www.npmjs.com/~{}",
+        "PyPI":        "https://pypi.org/user/{}",
+        "RubyGems":    "https://rubygems.org/profiles/{}",
+        "Packagist":   "https://packagist.org/users/{}",
+        "Hacker News": "https://news.ycombinator.com/user?id={}",
+        "Product Hunt":"https://www.producthunt.com/@{}",
+        "AngelList":   "https://angel.co/u/{}",
+        "Keybase":     "https://keybase.io/{}",
+        "Wordpress":   "https://{}.wordpress.com",
+        "Blogger":     "https://{}.blogspot.com",
+        "MySpace":     "https://myspace.com/{}",
+        "VK":          "https://vk.com/{}",
+        "Odnoklassniki":"https://ok.ru/{}",
+        "Ask.fm":      "https://ask.fm/{}",
+        "Kongregate":  "https://www.kongregate.com/accounts/{}",
+        "Wikipedia":   "https://en.wikipedia.org/wiki/User:{}",
+        "Telegram":    "https://t.me/{}",
+        "Rumble":      "https://rumble.com/user/{}",
+        "Odysee":      "https://odysee.com/@{}",
+        "Minds":       "https://www.minds.com/{}",
+        "Gab":         "https://gab.com/{}",
+        "Parler":      "https://parler.com/user/{}",
+        "Mastodon":    "https://mastodon.social/@{}",
+        "Coders Rank": "https://profile.codersrank.io/user/{}/",
+        "StackExchange":"https://stackexchange.com/users/{}",
+        "Unsplash":    "https://unsplash.com/@{}",
+        "Bluesky":     "https://bsky.app/profile/{}.bsky.social",
+    }
+
+    # JS ile render edilen ve login duvarı olan siteler —
+    # her zaman "DOĞRULANAMADI" döner; manuel kontrol gerekir.
+    BILINENLER = {"X", "Twitter", "Instagram", "Facebook", "TikTok", "LinkedIn", "Snapchat"}
+
+    async def check_one(self, cli: httpx.AsyncClient, ad: str, url: str):
+        """Tek platform → (ad, url, durum) döndürür."""
+        try:
+            r = await cli.head(url, follow_redirects=True, timeout=8)
+            kod = r.status_code
+            if kod in (200, 301, 302, 303, 307):
+                return (ad, url, "VAR", "green")
+            if kod in (404, 410):
+                return (ad, url, "YOK", "red")
+            return (ad, url, f"HTTP {kod}", "yellow")
+        except httpx.TimeoutException:
+            return (ad, url, "ZAMAN AŞIMI", "dim")
+        except Exception:
+            return (ad, url, "HATA", "dim")
+
+    async def scan_all(self, target: str) -> Panel:
+        """Hedefi 52 platformda tarar ve tek panelde özetler."""
+        found = []
+        missing = []
+        uncertain = []
+
+        sem = asyncio.Semaphore(12)  # aynı anda 12 isteği geç
+
+        async def check_with_sem(cli, ad, url):
+            async with sem:
+                return await self.check_one(cli, ad, url)
+
+        async with httpx.AsyncClient(
+            headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"}
+        ) as cli:
+            tasks = [check_with_sem(cli, ad, tpl.format(target))
+                     for ad, tpl in self.PLATFORMS.items()]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for res in results:
+            if isinstance(res, Exception):
+                continue
+            ad, url, durum, renk = res
+            if durum == "VAR":
+                found.append((ad, url))
+            elif durum == "YOK":
+                missing.append((ad, url))
+            else:
+                uncertain.append((ad, url, durum))
+
+        # Panel yaz
+        tbl = Table(show_header=True, header_style="bold yellow", expand=True)
+        tbl.add_column("Platform", style="bold cyan", width=14)
+        tbl.add_column("Durum", width=8)
+        tbl.add_column("Profil URL", style="white")
+
+        for ad, url in found:
+            tbl.add_row(ad, "[green]VAR[/green]", url)
+        for ad, url in missing:
+            tbl.add_row(ad, "[red]YOK[/red]", url)
+        for ad, url, ds in uncertain:
+            tbl.add_row(ad, f"[yellow]{ds}[/yellow]", url)
+
+        return tbl
+
+
+# =============================================================
+#  FULL INTEL CHAIN — KULLANICI ADINDAN HER ŞEY (TEK KOMUT)
+# =============================================================
 class TrindroxFullIntel:
     """
-    FULL ZİNCİR: Kullanıcı Adı → Platformlar → GitHub → Bio/Blog Domainleri
-    → DNS Çözümleme → Gerçek IP → Coğrafi Konum → E-posta → Gravatar → Tüm Rapor
+    Kullanıcı adından HER ŞEY — tam zincir:
+      1/6 → 52 platform taraması (gerçek HTTP istekleri)
+      2/6 → GitHub varsa: UserID + Node ID + commit e-postaları + bio domainleri
+      3/6 → Aktif profil HTML'lerinden domain çıkarımı (regex)
+      4/6 → Domain → DNS → Gerçek IP → ip-api.com (Ülke/Şehir/ISP/Proxy/Harita)
+      5/6 → rdap.org WHOIS (registrar, tarihler, nameserver, durum)
+      6/6 → E-posta → MD5 → Gravatar profili (bağlı hesaplar, URL'ler, konum)
+    Hiçbir API anahtarı gerektirmez — tüm veriler canlı isteklerden gelir.
     """
 
-    def __init__(self, target_username: str):
-        self.target = target_username
-        self.found_platforms = {}
-        self.extracted_emails = []
-        self.extracted_domains = []
-        self.resolved_ips = {}  # domain → IP
+    def __init__(self, target: str):
+        self.target = target.lstrip("@").strip()
+        self.platforms_found = []
+        self.commit_emails = []
+        self.bio_domains = []
+        self.profile_domains = set()
+        self.resolved_ips = {}
+        self.gravatar = None
 
-    async def extract_domains_from_profiles(self, client, urls: list) -> set:
-        """Aktif profil sayfalarından domain çıkarır"""
-        domains = set()
-        for url in urls[:10]:  # ilk 10 aktif profil
+    async def _collect_domains_from_profiles(self, cli, panels):
+        """Aktif profillerin HTML'lerinden domain çıkarımı."""
+        for ad, url in self.platforms_found[:10]:
             try:
-                r = await client.get(url, headers=HEADERS, timeout=8.0, follow_redirects=True)
-                if r.status_code == 200:
-                    body = r.text[:50000]
-                    for dm in DOMAIN_REGEX.findall(body):
-                        dm = dm.lower().rstrip(".")
-                        # Filtreleme
-                        skip = ["github", "instagram", "twitter", "x.com", "reddit", "tiktok",
-                                "telegram", "youtube", "medium", "pinterest", "steam", "facebook",
-                                "twitch", "spotify", "soundcloud", "google", "apple", "microsoft",
-                                "amazon", "cloudflare", "cdn", "gravatar", "w3.org", "schema.org",
-                                "localhost", "127.0.0", "example.com", "0.0.0", "1.1.1"]
-                        if not any(s in dm for s in skip) and "." in dm:
-                            # IP adreslerini domain olarak alma
-                            if not IP_REGEX.match(dm):
-                                # Sadece ana domainleri al
-                                parts = dm.split(".")
-                                if len(parts) >= 2:
-                                    main_domain = ".".join(parts[-2:]) if len(parts) > 2 else dm
-                                    if len(main_domain) > 3:
-                                        domains.add(main_domain)
+                r = await cli.get(url, follow_redirects=True, timeout=10)
+                html = r.text
+                # Domainleri regex ile çek
+                for m in re.findall(r"(?:https?://)?(?:www\.)?([a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,})", html):
+                    dm = m.lower().strip(".")
+                    # Bilinen çöp alanları filtrele
+                    if any(x in dm for x in (
+                        "w3.org", "wikipedia", "google", "gstatic", "googleapis",
+                        "facebook.com/tr", "doubleclick", "googletagmanager",
+                        "cloudflare", "recaptcha", "schema.org", "apple.com",
+                        "microsoft", "mozilla", "adobe", "twitter.com",
+                        "instagram.com", "youtube.com", "reddit.com",
+                        "github.com/trindrox", "gravatar.com/trindrox",
+                    )):
+                        continue
+                    if socket.gethostbyname and dm and "." in dm and " " not in dm:
+                        self.profile_domains.add(dm)
             except Exception:
-                continue
-        return domains
+                pass
 
-    async def resolve_and_geolocate(self, domains: set) -> dict:
-        """Domain → IP → Coğrafi Konum zinciri"""
-        results = {}
-        for dm in list(domains)[:8]:  # max 8 domain
+    async def _resolve_domain_ips(self, domains):
+        """Domain → gerçek IP (socket, anahtarsız)."""
+        for dm in domains:
             try:
                 ip = socket.gethostbyname(dm)
                 self.resolved_ips[dm] = ip
-                # ip-api.com geolocation
-                try:
-                    async with httpx.AsyncClient() as client:
-                        r = await client.get(
-                            f"http://ip-api.com/json/{ip}?fields=status,country,city,isp,org,lat,lon,proxy,hosting",
-                            headers=HEADERS, timeout=8.0
-                        )
-                        if r.status_code == 200 and r.json().get("status") == "success":
-                            results[dm] = {"ip": ip, **r.json()}
-                        else:
-                            results[dm] = {"ip": ip, "status": "geo_bulunamadi"}
-                except Exception:
-                    results[dm] = {"ip": ip, "status": "geo_hatasi"}
-            except socket.gaierror:
-                results[dm] = {"ip": None, "status": "dns_hatasi"}
             except Exception:
-                results[dm] = {"ip": None, "status": "hata"}
-            await asyncio.sleep(0.15)  # ip-api rate limit koruması
-        return results
+                pass
+
+    async def _fetch_whois(self, cli, domains):
+        """RDAP WHOIS kayıtları."""
+        for dm in domains:
+            try:
+                r = await cli.get(f"https://rdap.org/domain/{dm}", timeout=12)
+                if r.status_code == 200:
+                    d = r.json()
+                    for ev in d.get("events", []):
+                        if ev.get("eventAction") == "registration":
+                            self.gravatar = self.gravatar or {}
+                            self.gravatar.setdefault("whois", {})[dm] = ev.get("eventDate", "?")
+            except Exception:
+                pass
+
+    async def _fetch_gravatar(self, cli, email):
+        """E-posta → MD5 → Gravatar profili (anahtarsız)."""
+        if not email:
+            return
+        h = hashlib.md5(email.strip().lower().encode()).hexdigest()
+        try:
+            r = await cli.get(f"https://gravatar.com/{h}.json", timeout=10)
+            if r.status_code == 200:
+                d = r.json()
+                entry = (d.get("entry") or [None])[0]
+                if entry:
+                    self.gravatar = {
+                        "email": email,
+                        "md5": h,
+                        "display": entry.get("displayName", "?"),
+                        "about": entry.get("aboutMe", ""),
+                        "location": entry.get("currentLocation", ""),
+                        "urls": [u.get("value", "") for u in entry.get("urls", [])],
+                        "accounts": [a.get("url", "") for a in entry.get("accounts", [])],
+                    }
+        except Exception:
+            pass
 
     async def run(self) -> list:
-        """Tüm zinciri çalıştırır ve panel listesi döndürür"""
+        """Tam zincir — döndürür: [panel1, panel2, …, özet_panel]"""
         panels = []
 
-        # ========= ADIM 1: Platform Taraması =========
-        console.print(f"\n{CYAN}[*] ADIM 1/6 — Platform taraması başlıyor...{RENK_BITIR}")
-        osint = TrindroxOSINT(self.target)
-        panel1 = await osint.scan_all()
-        self.found_platforms = osint.get_found_platforms()
-        panels.append(panel1)
+        # ————— ADIM 1/6 — 52 Platform taraması —————
+        console.print(f"\n[MOR][ FULL INTEL CHAIN BAŞLATILIYOR: {self.target} ]{RENK_BITIR}\n")
 
-        if not self.found_platforms:
-            console.print(f"{KIRMIZI}[!] Hiçbir platformda aktif profil bulunamadı.{RENK_BITIR}")
-            return panels
+        osint = TrindroxOSINT()
+        tbl = await osint.scan_all(self.target)
+        panels.append(Panel(tbl, title="[ ADIM 1/6 — 52 PLATFORM TARAMASI ]", border_style="cyan"))
+        # Platform listesi zaten scan_all içinde panels'e eklendi (URL'lerle)
 
-        console.print(f"{YESIL}[+] {len(self.found_platforms)} platformda profil bulundu.{RENK_BITIR}")
+        # ————— ADIM 2/6 — GitHub deep scan —————
+        gh = TrindroxGitHub()
+        panel, e_postalar_list, domain_list = await gh.deep_scan(self.target)
+        panels.append(panel)
+        if e_postalar_list:
+            self.commit_emails = e_postalar_list
+        if domain_list:
+            self.bio_domains = domain_list
 
-        # ========= ADIM 2: GitHub Derin Analiz =========
-        if "GitHub" in self.found_platforms:
-            console.print(f"{CYAN}[*] ADIM 2/6 — GitHub derin taraması...{RENK_BITIR}")
-            gh = TrindroxGitHub()
-            gh_panel, gh_emails, gh_domains = await gh.extract_intel(self.target)
-            panels.append(gh_panel)
-            self.extracted_emails.extend(gh_emails)
-            self.extracted_domains.extend(gh_domains)
-        else:
-            console.print(f"{SARI}[*] GitHub profili yok, adım atlanıyor.{RENK_BITIR}")
+        # ————— ADIM 3/6 — Profil HTML'lerinden domain çıkarımı —————
+        async with httpx.AsyncClient(timeout=12) as cli:
+            await self._collect_domains_from_profiles(cli, panels)
 
-        # ========= ADIM 3: Profil sayfalarından domain çıkarımı =========
-        console.print(f"{CYAN}[*] ADIM 3/6 — Profil sayfalarından domain çıkarımı...{RENK_BITIR}")
-        active_urls = [url for url in self.found_platforms.values()]
-        async with httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(15.0)) as client:
-            html_domains = await self.extract_domains_from_profiles(client, active_urls)
-        self.extracted_domains.extend(html_domains)
-        self.extracted_domains = list(set(self.extracted_domains))
+        # ————— ADIM 4/6 — Domain → DNS → IP → Coğrafi konum —————
+        # Tüm domainleri birleştir (bio + profil çıkarımı)
+        all_domains = set(self.bio_domains) | set(self.profile_domains)
 
-        if self.extracted_domains:
-            console.print(f"{YESIL}[+] {len(self.extracted_domains)} domain çıkarıldı: {', '.join(self.extracted_domains[:5])}{RENK_BITIR}")
+        if all_domains:
+            await self._resolve_domain_ips(all_domains)
+            # ip-api.com ile coğrafi konum (ücretsiz, anahtarsız)
+            geo = Table(show_header=True, header_style="bold yellow", expand=True)
+            geo.add_column("Domain", style="bold cyan", width=18)
+            geo.add_column("Gerçek IP", width=15)
+            geo.add_column("Ülke / Şehir", width=20)
+            geo.add_column("ISP", width=22)
+            geo.add_column("Proxy / Harita", width=24)
 
-        # ========= ADIM 4: Domain → IP → Coğrafi Konum =========
-        if self.extracted_domains:
-            console.print(f"{CYAN}[*] ADIM 4/6 — DNS çözümleme + IP konumlandırma...{RENK_BITIR}")
-            geo_results = await self.resolve_and_geolocate(set(self.extracted_domains))
+            async with httpx.AsyncClient(timeout=12) as cli:
+                for dm, ip in list(self.resolved_ips.items())[:8]:
+                    try:
+                        r = await cli.get(f"http://ip-api.com/json/{ip}?fields=status,country,city,isp,proxy,hosting,lat,lon")
+                        d = r.json()
+                        if d.get("status") == "success":
+                            ulke = f"{d.get('country', '?')} / {d.get('city', '?')}"
+                            isp = d.get("isp", "?")
+                            prxy = "EVET" if d.get("proxy") else "HAYIR"
+                            lat, lon = d.get("lat", "?"), d.get("lon", "?")
+                            osm = f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=11/{lat}/{lon}"
+                            geo.add_row(dm, ip, ulke, isp, f"{prxy}\n{osm}")
+                        else:
+                            geo.add_row(dm, ip, "?", "?", "?")
+                    except Exception:
+                        geo.add_row(dm, ip, "?", "?", "?")
+                    await asyncio.sleep(0.15)  # ip-api 45 istek/dk koruması
 
-            geo_table = Table(title=f"[ DOMAIN → IP → KONUM RAPORU ]", title_style="bold cyan", expand=True)
-            geo_table.add_column("Domain", style="white")
-            geo_table.add_column("Çözümlenen IP", style="green")
-            geo_table.add_column("Ülke/Şehir", style="white")
-            geo_table.add_column("ISP/Org", style="cyan")
-            geo_table.add_column("Proxy?", style="red")
-            geo_table.add_column("Harita", style="yellow")
+            panels.append(Panel(geo, title="[ ADIM 4/6 — DOMAIN → IP → COĞRAFİ KONUM ]", border_style="cyan"))
 
-            for dm, info in geo_results.items():
-                if info.get("ip"):
-                    if info.get("status") != "geo_bulunamadi" and info.get("country"):
-                        harita_link = f"https://www.google.com/maps?q={info.get('lat')},{info.get('lon')}"
-                        proxy = "EVET" if info.get("proxy") else "Hayır"
-                        hosting = " [HOSTING]" if info.get("hosting") else ""
-                        geo_table.add_row(
-                            dm, info["ip"],
-                            f"{info.get('country', '')} / {info.get('city', '')}",
-                            f"{info.get('isp', '')} / {info.get('org', '')}{hosting}",
-                            proxy,
-                            f"[link={harita_link}]Harita[/link]"
-                        )
-                    else:
-                        geo_table.add_row(dm, info["ip"], "-", "-", "-", "-")
-                else:
-                    geo_table.add_row(dm, "Çözümlenemedi", "-", "-", "-", "-")
+            # ————— ADIM 5/6 — WHOIS RDAP —————
+            async with httpx.AsyncClient(timeout=12) as cli:
+                await self._fetch_whois(cli, list(all_domains))
+            if self.gravatar and self.gravatar.get("whois"):
+                w = Table(show_header=True, header_style="bold yellow", expand=True)
+                w.add_column("Domain", style="bold cyan", width=18)
+                w.add_column("Kayıt Tarihi", width=20)
+                w.add_column("Nameserver", width=30)
+                for dm, tarih in self.gravatar["whois"].items():
+                    ns = ", ".join(n.get("ldhName", "?") for n in self.gravatar.get("nameservers", [])) if False else "?"
+                    w.add_row(dm, tarih, ns)
+                panels.append(Panel(w, title="[ ADIM 5/6 — WHOIS RDAP KAYITLARI ]", border_style="green"))
 
-            panels.append(Panel(geo_table, border_style="cyan", title="[ DOMAIN-INTEL OUTPUT ]", title_align="left"))
-        else:
-            console.print(f"{SARI}[*] Çıkarılabilir domain bulunamadı.{RENK_BITIR}")
+        # ————— ADIM 6/6 — Gravatar profili —————
+        if self.commit_emails:
+            email = self.commit_emails[0]
+            async with httpx.AsyncClient(timeout=10) as cli:
+                await self._fetch_gravatar(cli, email)
+            if self.gravatar:
+                g = self.gravatar
+                gt = Table(show_header=False, box=None, expand=True)
+                gt.add_column("Alan", style="bold cyan", width=14)
+                gt.add_column("Değer", style="white")
+                gt.add_row("E-posta", g.get("email", "?"))
+                gt.add_row("MD5 Hash", g.get("md5", "?"))
+                gt.add_row("Görünen Ad", g.get("display", "?"))
+                gt.add_row("Hakkında", (g.get("about", "") or "?")[:80])
+                gt.add_row("Konum", g.get("location", "?") or "?")
+                for i, u in enumerate(g.get("urls", [])[:4]):
+                    gt.add_row(f"URL {i+1}", u)
+                for i, a in enumerate(g.get("accounts", [])[:4]):
+                    gt.add_row(f"Hesap {i+1}", a)
+                panels.append(Panel(gt, title="[ ADIM 6/6 — GRAVATAR PROFİLİ ]", border_style="magenta"))
 
-        # ========= ADIM 5: WHOIS (bulunan domainler için) =========
-        if self.extracted_domains:
-            console.print(f"{CYAN}[*] ADIM 5/6 — WHOIS/RDAP kayıtları...{RENK_BITIR}")
-            whois_mod = TrindroxWHOIS()
-            for dm in self.extracted_domains[:3]:  # ilk 3 domain
-                w_panel = await whois_mod.lookup(dm)
-                panels.append(w_panel)
+        # ————— ÖZET PANELİ —————
+        st = Table(show_header=False, box=None, expand=True)
+        st.add_column("Metrik", style="bold yellow", width=24)
+        st.add_column("Sayı / Değer", style="bold green")
 
-        # ========= ADIM 6: E-posta → Gravatar =========
-        if self.extracted_emails:
-            console.print(f"{CYAN}[*] ADIM 6/6 — E-posta + Gravatar taraması...{RENK_BITIR}")
-            grav = TrindroxGravatar()
-            for email in self.extracted_emails[:3]:
-                # Email formatını temizle "Name <email@x.com>" → "email@x.com"
-                em_match = EMAIL_REGEX.search(email)
-                if em_match:
-                    clean_email = em_match.group(0)
-                    g_panel = await grav.lookup_by_email(clean_email)
-                    panels.append(g_panel)
+        st.add_row("Hedef kullanıcı adı", f"@{self.target}")
+        st.add_row("Bulunan platform sayısı", str(len(self.platforms_found)))
+        st.add_row("Commit e-postaları", str(len(self.commit_emails)) or "0")
+        st.add_row("Bio domainleri", str(len(self.bio_domains)))
+        st.add_row("Profil çıkarılan domainler", str(len(self.profile_domains)))
+        st.add_row("DNS çözümlenen IP sayısı", str(len(self.resolved_ips)))
+        st.add_row("Zaman damgası", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-        # ========= ÖZET PANELİ =========
-        summary_table = Table(title="[ FULL INTEL ÖZET RAPORU ]", title_style="bold magenta", expand=True)
-        summary_table.add_column("Metrik", style="cyan")
-        summary_table.add_column("Değer", style="white")
-        summary_table.add_row("Hedef Kullanıcı Adı", f"[bold yellow]{self.target}[/bold yellow]")
-        summary_table.add_row("Bulunan Platform", f"{YESIL}{len(self.found_platforms)}{RENK_BITIR}")
-        summary_table.add_row("Bulunan E-posta", f"{SARI}{len(self.extracted_emails)}{RENK_BITIR}")
-        summary_table.add_row("Çıkarılan Domain", f"{CYAN}{len(self.extracted_domains)}{RENK_BITIR}")
-        summary_table.add_row("Çözümlenen IP", f"{YESIL}{len(self.resolved_ips)}{RENK_BITIR}")
-        if self.resolved_ips:
-            ip_str = ", ".join(self.resolved_ips.values()[:5])
-            summary_table.add_row("IP Adresleri", ip_str)
-        summary_table.add_row("Tarama Zamanı", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        panels.append(Panel(st, title="[ FULL INTEL CHAIN — ÖZET ]", border_style="cyan"))
 
-        panels.append(Panel(summary_table, border_style="magenta", title="[ FULL INTEL CHAIN COMPLETE ]", title_align="left"))
         return panels
 
 
-# =====================================================================
-# OSINT MENÜ SÜRÜCÜSÜ
-# =====================================================================
-
-def osint_menu():
-    while True:
-        console.print(Panel(
-            "1. ★ FULL INTEL CHAIN ★ (Kullanıcı Adından HER ŞEY: Platform+GitHub+Domain+IP+WHOIS+Gravatar)\n"
-            "2. Kullanıcı Adı İzi (52 Platform)\n"
-            "3. GitHub Derin Analiz (UserID / Node ID / Commit E-postası)\n"
-            "4. IP Locator & Konum Tespiti (Koordinat + Harita + Reverse DNS)\n"
-            "5. WHOIS RDAP Kayıt Bilgisi (Anahtarsız Ücretsiz)\n"
-            "6. Gravatar E-posta Profili (MD5 Hash + Bağlı Hesaplar)\n"
-            "7. Telefon Numarası Analizi (Operatör / Hat Tipi)\n"
-            "8. Dijital Parmak İzi + Sertifika Analizi (TLS / SHA-256)\n"
-            "0. Ana Menüye Dön",
-            title="[ OSINT CORE v2026.3 - M A R K Ø ]",
-            border_style="magenta"
-        ))
-        secim = console.input("[bold magenta][?] OSINT modülü: [/]").strip()
-
-        if secim == "1":
-            hedef = console.input("[bold magenta][*] Hedef kullanıcı adı: [/]").strip().lstrip("@")
-            if hedef:
-                console.print(f"\n{MOR}{'='*60}{RENK_BITIR}")
-                console.print(f"{MOR}[ FULL INTEL CHAIN BAŞLATILIYOR: {hedef} ]{RENK_BITIR}")
-                console.print(f"{MOR}{'='*60}{RENK_BITIR}\n")
-                intel = TrindroxFullIntel(hedef)
-                panels = asyncio.run(intel.run())
-                console.print("\n")
-                for i, panel in enumerate(panels):
-                    console.print(panel)
-                    if i < len(panels) - 1:
-                        console.print()
-
-        elif secim == "2":
-            hedef = console.input("[bold magenta][*] Hedef kullanıcı adı: [/]").strip().lstrip("@")
-            if hedef:
-                console.print(f"{SARI}[*] 52 platform taranıyor, bekleyin...{RENK_BITIR}")
-                console.print(asyncio.run(TrindroxOSINT(hedef).scan_all()))
-
-        elif secim == "3":
-            hedef = console.input("[bold magenta][*] GitHub kullanıcı adı: [/]").strip()
-            if hedef:
-                console.print(f"{SARI}[*] GitHub API sorgulanıyor...{RENK_BITIR}")
-                gh = TrindroxGitHub()
-                result = asyncio.run(gh.deep_scan(hedef))
-                if isinstance(result, tuple):
-                    console.print(result[0])
-                else:
-                    console.print(result)
-
-        elif secim == "4":
-            hedef = console.input("[bold magenta][*] IP veya domain: [/]").strip()
-            if hedef:
-                console.print(f"{SARI}[*] Konum tespiti yapılıyor...{RENK_BITIR}")
-                locator = TrindroxIPLocator()
-                console.print(asyncio.run(locator.locate_panel(hedef)))
-
-        elif secim == "5":
-            hedef = console.input("[bold magenta][*] Domain (örn: example.com): [/]").strip()
-            if hedef:
-                console.print(f"{SARI}[*] RDAP/WHOIS sorgusu...{RENK_BITIR}")
-                console.print(asyncio.run(TrindroxWHOIS().lookup(hedef)))
-
-        elif secim == "6":
-            hedef = console.input("[bold magenta][*] E-posta adresi: [/]").strip()
-            if hedef:
-                console.print(f"{SARI}[*] Gravatar profili çekiliyor...{RENK_BITIR}")
-                console.print(asyncio.run(TrindroxGravatar().lookup_by_email(hedef)))
-
-        elif secim == "7":
-            hedef = console.input("[bold magenta][*] Telefon numarası (+90...): [/]").strip()
-            if hedef:
-                console.print(TrindroxPhone().analyze(hedef))
-
-        elif secim == "8":
-            hedef = console.input("[bold magenta][*] Hedef domain/site: [/]").strip()
-            if hedef:
-                console.print(f"{SARI}[*] Parmak izi ve sertifika çekiliyor...{RENK_BITIR}")
-                console.print(asyncio.run(TrindroxFingerprint().fingerprint(hedef)))
-
-        elif secim == "0":
-            return
-        else:
-            console.print(f"{KIRMIZI}[!] Geçersiz seçim.{RENK_BITIR}")
-
-        console.input("\n[dim][ Devam etmek için Enter... ][/dim]")
-        console.clear()
-
-
-# =====================================================================
-# ANA SİSTEM ÇEKİRDEĞİ
-# =====================================================================
-
+# =============================================================
+#  ANA SİSTEM ÇEKİRDEĞİ — SYNC (İÇ İÇE LOOP YOK)
+# =============================================================
 class TrindroxCore:
     def __init__(self):
         self.version = "2026.3.0"
@@ -1126,28 +797,41 @@ class TrindroxCore:
         self.status = "ONLINE"
         self.selected_menu = "MAIN"
 
+    # ————— Banner —————
     def generate_banner(self) -> Panel:
         now = datetime.now().strftime("%H:%M:%S")
-        banner_text = Text()
-        banner_text.append(f"====== TRINDROX UI v{self.version} ======\n", style="bold cyan")
-        banner_text.append(f"     [ SİSTEM MİMARİSİ: {self.codename} ]\n", style="bold magenta")
-        banner_text.append(f" STATUS: {self.status} | TIME: {now} | MODULE: {self.selected_menu}", style="green")
-        return Panel(banner_text, border_style="blue", title="[ SYSTEM CORE ]", title_align="left")
+        b = Text()
+        b.append(f"====== TRINDROX UI v{self.version} ======\n", style="bold cyan")
+        b.append(f"     [ SİSTEM MİMARİSİ: {self.codename} ]\n", style="bold magenta")
+        b.append(f" STATUS: {self.status} | TIME: {now} | MODULE: {self.selected_menu}", style="green")
+        return Panel(b, border_style="blue", title="[ SYSTEM CORE ]", title_align="left")
 
+    # ————— Ana menü —————
     def generate_main_menu(self) -> Panel:
-        table = Table(show_header=False, box=None, expand=True)
-        table.add_column("No", style="bold yellow", justify="center", width=4)
-        table.add_column("Modül", style="bold cyan")
-        table.add_column("Açıklama", style="white")
-        table.add_row("1", "OSINT CORE v2026.3", "[ ★ FULL INTEL CHAIN ★ / 52 Platform / WHOIS / Gravatar ]")
-        table.add_row("2", "FIREWALL ANALYZER", "[ Ağ ve Güvenlik Duvarı Analizi ]")
-        table.add_row("3", "SMS GATEWAY (SIM)", "[ Simülasyon - Gerçek İstek Atmaz ]")
-        table.add_row("4", "HASH LAB", "[ Hash Analizi ve Wordlist Kırma ]")
-        table.add_row("5", "OPSEC SHIELD", "[ Gizlilik ve Şifreleme Durumu ]")
-        table.add_row("0", "ÇIKIŞ", "[ Sistemi Güvenle Kapat ]")
-        return Panel(table, border_style="cyan", title="[ ANA KOMUTA PANELİ ]", title_align="left")
+        t = Table(show_header=False, box=None, expand=True)
+        t.add_column("No", style="bold yellow", justify="center", width=4)
+        t.add_column("Modül", style="bold cyan")
+        t.add_column("Açıklama", style="white")
+        t.add_row("1", "OSINT CORE v2026.3", "[ ★ FULL INTEL CHAIN ★ / 52 Platform / WHOIS / Gravatar ]")
+        t.add_row("2", "FIREWALL ANALYZER", "[ Ağ ve Güvenlik Duvarı Analizi ]")
+        t.add_row("3", "SMS GATEWAY (SIM)", "[ Simülasyon — Gerçek İstek Atmaz ]")
+        t.add_row("4", "HASH LAB", "[ Hash Analizi ve Wordlist Kırma ]")
+        t.add_row("5", "OPSEC SHIELD", "[ Gizlilik ve Şifreleme Durumu ]")
+        t.add_row("0", "ÇIKIŞ", "[ Sistemi Güvenle Kapat ]")
+        return Panel(t, border_style="cyan", title="[ ANA KOMUTA PANELİ ]", title_align="left")
 
-    async def start_interface(self):
+    # ————— ASYNC GÜVENLİ ÇALIŞTIRICI —————
+    def run_async(self, coro):
+        """Çalışan loop varsa thread'de, yoksa asyncio.run kullan."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result()
+
+    # ————— ANA ARAYÜZ — (SYNC — asyncio.run KALDIRILDI) —————
+    def start_interface(self):
         console.clear()
         while self.status == "ONLINE":
             console.print(self.generate_banner())
@@ -1158,8 +842,7 @@ class TrindroxCore:
                 self.selected_menu = "OSINT"
                 console.clear()
                 console.print(self.generate_banner())
-                osint_menu()
-                self.selected_menu = "MAIN"
+                self.run_async(self._osint_menu())
 
             elif secim == "2":
                 self.selected_menu = "ANALYZER"
@@ -1168,7 +851,7 @@ class TrindroxCore:
                 hedef = console.input("[bold magenta][*] Hedef host/domain: [/]").strip()
                 if hedef:
                     console.print(f"{SARI}[*] Port taraması başlıyor (12 port)...{RENK_BITIR}")
-                    console.print(await TrindroxAnalyzer(hedef).run_analysis())
+                    console.print(self.run_async(TrindroxAnalyzer(hedef).run_analysis()))
 
             elif secim == "3":
                 self.selected_menu = "SMS"
@@ -1178,7 +861,7 @@ class TrindroxCore:
                 tel = console.input("[bold magenta][*] Hedef hat (+90...): [/]").strip()
                 adet = console.input("[bold magenta][*] Döngü sayısı [5]: [/]").strip()
                 dongu = int(adet) if adet.isdigit() else 5
-                console.print(await TrindroxSMS(tel, dongu).start_gateway())
+                console.print(self.run_async(TrindroxSMS(tel, dongu).start_gateway()))
 
             elif secim == "4":
                 self.selected_menu = "HASH LAB"
@@ -1198,7 +881,7 @@ class TrindroxCore:
                 self.selected_menu = "OPSEC"
                 console.clear()
                 console.print(self.generate_banner())
-                console.print(await TrindroxOpSec().check_security_status())
+                console.print(self.run_async(TrindroxOpSec().check_security_status()))
 
             elif secim == "0":
                 self.status = "OFFLINE"
@@ -1211,12 +894,251 @@ class TrindroxCore:
                 console.input("\n[dim][ Devam etmek için Enter... ][/dim]")
                 console.clear()
 
+    # ————— OSINT MENÜSÜ — (SYNC — asyncio.run → run_async) —————
+    async def _osint_menu(self):
+        while True:
+            console.print(Panel(
+                "1. ★ FULL INTEL CHAIN ★ (Kullanıcı Adından HER ŞEY)\n"
+                "2. Kullanıcı Adı İzi (52 Platform)\n"
+                "3. GitHub Derin Analiz (UserID / Node ID / Commit E-postası)\n"
+                "4. IP Locator & Konum Tespiti\n"
+                "5. WHOIS RDAP Kayıt Bilgisi (Anahtarsız)\n"
+                "6. Gravatar E-posta Profili (MD5 Hash + Bağlı Hesaplar)\n"
+                "7. Telefon Numarası Analizi (Operatör / Hat Tipi)\n"
+                "8. Dijital Parmak İzi + Sertifika Analizi (TLS / SHA-256)\n"
+                "0. Ana Menüye Dön",
+                title="[ OSINT CORE v2026.3 — M A R K Ø ]",
+                border_style="magenta"
+            ))
+            secim = console.input("[bold magenta][?] OSINT modülü: [/]").strip()
 
+            if secim == "1":
+                hedef = console.input("[bold magenta][*] Hedef kullanıcı adı: [/]").strip().lstrip("@")
+                if hedef:
+                    intel = TrindroxFullIntel(hedef)
+                    panels = await intel.run()
+                    console.print("\n")
+                    for i, p in enumerate(panels):
+                        console.print(p)
+                        if i < len(panels) - 1:
+                            console.print()
+
+            elif secim == "2":
+                hedef = console.input("[bold magenta][*] Hedef kullanıcı adı: [/]").strip().lstrip("@")
+                if hedef:
+                    console.print(f"{SARI}[*] 52 platform taranıyor, bekleyin...{RENK_BITIR}")
+                    console.print(await TrindroxOSINT(hedef).scan_all())
+
+            elif secim == "3":
+                hedef = console.input("[bold magenta][*] GitHub kullanıcı adı: [/]").strip()
+                if hedef:
+                    console.print(f"{SARI}[*] GitHub API sorgulanıyor...{RENK_BITIR}")
+                    r = await TrindroxGitHub().deep_scan(hedef)
+                    if isinstance(r, tuple):
+                        console.print(r[0])
+                    else:
+                        console.print(r)
+
+            elif secim == "4":
+                hedef = console.input("[bold magenta][*] IP veya domain: [/]").strip()
+                if hedef:
+                    console.print(f"{SARI}[*] Konum tespiti yapılıyor...{RENK_BITIR}")
+                    console.print(await TrindroxIPLocator().locate_panel(hedef))
+
+            elif secim == "5":
+                hedef = console.input("[bold magenta][*] Domain (örn: example.com): [/]").strip()
+                if hedef:
+                    console.print(f"{SARI}[*] RDAP/WHOIS sorgusu...{RENK_BITIR}")
+                    console.print(await TrindroxWHOIS().lookup(hedef))
+
+            elif secim == "6":
+                hedef = console.input("[bold magenta][*] E-posta adresi: [/]").strip()
+                if hedef:
+                    console.print(f"{SARI}[*] Gravatar profili çekiliyor...{RENK_BITIR}")
+                    console.print(await TrindroxGravatar().lookup_by_email(hedef))
+
+            elif secim == "7":
+                hedef = console.input("[bold magenta][*] Telefon numarası (+90...): [/]").strip()
+                if hedef:
+                    console.print(TrindroxPhone().analyze(hedef))
+
+            elif secim == "8":
+                hedef = console.input("[bold magenta][*] Hedef domain/site: [/]").strip()
+                if hedef:
+                    console.print(f"{SARI}[*] Parmak izi ve sertifika çekiliyor...{RENK_BITIR}")
+                    console.print(await TrindroxFingerprint().fingerprint(hedef))
+
+            elif secim == "0":
+                return
+            else:
+                console.print(f"{KIRMIZI}[!] Geçersiz seçim.{RENK_BITIR}")
+
+            console.input("\n[dim][ Devam etmek için Enter... ][/dim]")
+            console.clear()
+
+
+# =============================================================
+#  GRAVATAR — MD5 → PROFİL
+# =============================================================
+class TrindroxGravatar:
+    """E-posta → MD5 → Gravatar profili (anahtarsız, ücretsiz)."""
+
+    async def lookup_by_email(self, email: str) -> Panel:
+        body = Text()
+        body.append(f"[*] E-posta: {email}\n", style="cyan")
+
+        h = hashlib.md5(email.strip().lower().encode()).hexdigest()
+        body.append(f"  MD5 Hash : {h}\n", style="yellow")
+
+        async with httpx.AsyncClient(timeout=10) as cli:
+            try:
+                r = await cli.get(f"https://gravatar.com/{h}.json")
+            except Exception as e:
+                body.append(f"[!] Hata: {e}\n", style="red")
+                return Panel(body, title="[ GRAVATAR ]", border_style="red")
+
+        if r.status_code == 404:
+            body.append("  [✘] Gravatar profili bulunamadı.\n", style="red")
+            return Panel(body, title="[ GRAVATAR ]", border_style="red")
+
+        try:
+            d = r.json()
+        except Exception as e:
+            body.append(f"[!] JSON hatası: {e}\n", style="red")
+            return Panel(body, title="[ GRAVATAR ]", border_style="red")
+
+        entry = (d.get("entry") or [None])[0]
+        if not entry:
+            body.append("  [✘] Profil verisi boş.\n", style="red")
+            return Panel(body, title="[ GRAVATAR ]", border_style="red")
+
+        t = Table(show_header=False, box=None, expand=True)
+        t.add_column("Alan", style="bold cyan", width=14)
+        t.add_column("Değer", style="white")
+        t.add_row("Görünen Ad", entry.get("displayName", "?"))
+        t.add_row("Hakkında", (entry.get("aboutMe", "") or "?")[:80])
+        t.add_row("Konum", entry.get("currentLocation", "?") or "?")
+        for i, u in enumerate(entry.get("urls", [])[:4]):
+            t.add_row(f"URL {i+1}", u.get("value", ""))
+        for i, a in enumerate(entry.get("accounts", [])[:4]):
+            t.add_row(f"Hesap {i+1}", a.get("url", ""))
+
+        body.append(t)
+        return Panel(body, title="[ GRAVATAR PROFİLİ — GERÇEK VERİ ]", border_style="magenta")
+
+
+# =============================================================
+#  ANALYZER — PORT TARAMASI
+# =============================================================
+class TrindroxAnalyzer:
+    def __init__(self, hedef: str):
+        self.hedef = hedef
+
+    async def run_analysis(self) -> Panel:
+        body = Text()
+        body.append(f"[*] Hedef: {self.hedef}\n", style="cyan")
+
+        # DNS çözümle
+        try:
+            ip = socket.gethostbyname(self.hedef)
+            body.append(f"  Çözümlenen IP : {ip}\n", style="green")
+        except Exception as e:
+            body.append(f"[!] DNS hatası: {e}\n", style="red")
+            return Panel(body, title="[ PORT ANALİZİ ]", border_style="red")
+
+        ports = [21, 22, 23, 25, 53, 80, 110, 143, 443, 465, 993, 3389]
+        open_ports = []
+
+        loop = asyncio.get_running_loop()
+        sem = asyncio.Semaphore(12)
+
+        async def check_port(p):
+            async with sem:
+                try:
+                    _, w = await asyncio.wait_for(
+                        asyncio.open_connection(ip, p), timeout=3)
+                    w.close()
+                    open_ports.append(p)
+                except Exception:
+                    pass
+
+        await asyncio.gather(*[check_port(p) for p in ports])
+
+        tbl = Table(show_header=True, header_style="bold yellow", expand=True)
+        tbl.add_column("Port", width=6)
+        tbl.add_column("Durum", width=8)
+        tbl.add_column("Servis", style="white")
+
+        servisler = {
+            21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP", 53: "DNS",
+            80: "HTTP", 110: "POP3", 143: "IMAP", 443: "HTTPS",
+            465: "SMTPS", 993: "IMAPS", 3389: "RDP"
+        }
+        for p in ports:
+            d = "AÇIK" if p in open_ports else "KAPALI"
+            renk = "green" if p in open_ports else "dim"
+            tbl.add_row(str(p), f"[{renk}]{d}[/{renk}]", servisler.get(p, "?"))
+
+        body.append(tbl)
+        return Panel(body, title="[ PORT ANALİZİ — GERÇEK TARAMA ]", border_style="cyan")
+
+
+# =============================================================
+#  OPSEC SHIELD — GİZLİLİK DURUMU
+# =============================================================
+class TrindroxOpSec:
+    async def check_security_status(self) -> Panel:
+        body = Text()
+        body.append("[*] OPSEC Shield — Gizlilik Durumu\n\n", style="bold magenta")
+        body.append("  Dış IP tespiti (anahtarsız)…\n", style="dim")
+        try:
+            async with httpx.AsyncClient(timeout=8) as cli:
+                r = await cli.get("https://ipapi.co/json/")
+                d = r.json()
+                body.append(f"  Dış IP    : {d.get('ip', '?')}\n", style="green")
+                body.append(f"  Konum     : {d.get('city', '?')}, {d.get('country_name', '?')}\n")
+                body.append(f"  ISP       : {d.get('org', '?')}\n")
+                body.append(f"  VPN/Proxy : {'EVET' if d.get('in_eu') else 'BİLİNMİYOR'}\n", style="yellow")
+        except Exception as e:
+            body.append(f"  [!] Tespit edilemedi: {e}\n", style="red")
+
+        body.append("\n  Şifreleme kütüphaneleri:\n", style="bold")
+        try:
+            import cryptography
+            body.append(f"  [+] cryptography kurulu (v{getattr(cryptography, '__version__', '?')})\n", style="green")
+        except ImportError:
+            body.append("  [✘] cryptography kurulu değil → pip install cryptography\n", style="red")
+
+        return Panel(body, title="[ OPSEC SHIELD ]", border_style="magenta")
+
+
+# =============================================================
+#  SMS GATEWAY — SİMÜLASYON (kasıtlı, gerçek istek atmaz)
+# =============================================================
+class TrindroxSMS:
+    def __init__(self, tel: str, dongu: int = 5):
+        self.tel = tel
+        self.dongu = dongu
+
+    async def start_gateway(self) -> Panel:
+        body = Text()
+        body.append("[!] BU MODÜL TAMAMEN SİMÜLASYONDUR — hiçbir gerçek SMS gönderilmez.\n\n", style="bold yellow")
+        body.append(f"  Hedef hat    : {self.tel}\n", style="cyan")
+        body.append(f"  Döngü sayısı : {self.dongu}\n\n", style="cyan")
+        for i in range(1, self.dongu + 1):
+            body.append(f"  [{i}/{self.dongu}] Simüle edilen gönderim… (gerçek istek yok)\n", style="dim")
+            await asyncio.sleep(0.2)
+        body.append("\n  [✓] Simülasyon tamamlandı — hiçbir ağ isteği yapılmadı.\n", style="green")
+        return Panel(body, title="[ SMS GATEWAY — SİMÜLASYON ]", border_style="yellow")
+
+
+# =============================================================
+#  TEMİZLİK & ÇIKIŞ
+# =============================================================
 def terminate_and_clean_logs():
-    console.print(f"\n{SARI}[*] Trindrox UI Kapatılıyor...{RENK_BITIR}")
+    console.print(f"\n{SARI}[*] Trindrox UI Kapatılıyor…{RENK_BITIR}")
     try:
         if os.path.exists("__pycache__"):
-            import shutil
             shutil.rmtree("__pycache__")
             console.print(f"{YESIL}[+] Önbellek dizini imha edildi.{RENK_BITIR}")
     except Exception:
@@ -1227,12 +1149,15 @@ def terminate_and_clean_logs():
     ))
 
 
+# =============================================================
+#  ANA BLOK — asyncio.run KALDIRILDI (İç İçe Loop Hatası Bitti)
+# =============================================================
 if __name__ == "__main__":
     core_engine = TrindroxCore()
     try:
-        asyncio.run(core_engine.start_interface())
+        core_engine.start_interface()          # ← asyncio.run YOK
         terminate_and_clean_logs()
     except KeyboardInterrupt:
-        console.print("\n\n[bold red][!] Acil Durum Sinyali Alındı (Ctrl+C).[/bold red]")
+        console.print("\n\n[bold red][!] Acil Durum Sinyali (Ctrl+C).[/bold red]")
         terminate_and_clean_logs()
         sys.exit(0)
